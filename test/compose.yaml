@@ -1,0 +1,61 @@
+# Test instance: SilverBullet in multi-space mode with two spaces and two users.
+#
+#   docker compose -f test/compose.yaml up -d --wait
+#
+# SilverBullet listens on http://127.0.0.1:3300. The bootstrap writes the
+# API tokens to test/.state/ (git-ignored). Reset everything with
+#   docker compose -f test/compose.yaml down -v
+#
+# Grants (see bootstrap/bootstrap.sh):
+#   space  path    alice                 bob
+#   alpha  /alpha  write + runtime API   read
+#   beta   /beta   -                     write + runtime API
+#   admin is an administrator (write on every space) and is used only by the bootstrap.
+
+name: sbmcp-test
+
+services:
+  setup:
+    image: ${SB_IMAGE:-ghcr.io/silverbulletmd/silverbullet:latest}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - test -f /data/users.json || /silverbullet setup /data --admin "admin:$$SB_ADMIN_PASSWORD"
+    environment:
+      SB_ADMIN_PASSWORD: ${SB_ADMIN_PASSWORD:-admin-test-password}
+    volumes:
+      - sbdata:/data
+
+  silverbullet:
+    image: ${SB_IMAGE:-ghcr.io/silverbulletmd/silverbullet:latest}
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      PUID: "0"
+      RUST_LOG: info
+    ports:
+      - "127.0.0.1:${SB_PORT:-3300}:3000"
+    volumes:
+      - sbdata:/data
+    healthcheck:
+      # The admin API answers 401 once the multi-space stack is mounted.
+      test: ["CMD-SHELL", "test \"$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/.dashboard/api/admin/spaces)\" = 401"]
+      interval: 2s
+      retries: 30
+
+  bootstrap:
+    image: ${SB_IMAGE:-ghcr.io/silverbulletmd/silverbullet:latest}
+    depends_on:
+      silverbullet:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/bootstrap/bootstrap.sh"]
+    environment:
+      SB_URL: http://silverbullet:3000
+      SB_HOST_PORT: ${SB_PORT:-3300}
+      SB_ADMIN_PASSWORD: ${SB_ADMIN_PASSWORD:-admin-test-password}
+    volumes:
+      - ./bootstrap:/bootstrap:ro
+      - ./.state:/state
+
+volumes:
+  sbdata:
