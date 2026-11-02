@@ -140,7 +140,7 @@ client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverB
 
 ### 3. Access control: SilverBullet is the ceiling, an access list below it
 
-SilverBullet grants rights per space. The server passes SilverBullet's refusals (`401`, `403`, `404`, `412`) through and never widens them. Below that ceiling an **access list** beside the credentials file says, per user, space and path prefix, what the user may do through the MCP server:
+SilverBullet grants rights per space. The server passes SilverBullet's refusals (`401`, `403`, `404`, `412`) through as clear messages (for example "no write access to space alpha"; a refusal by the access list says so, too) and never widens them. Below that ceiling an **access list** beside the credentials file says, per user, space and path prefix, what the user may do through the MCP server:
 
 | Right | Allows |
 |---|---|
@@ -168,10 +168,11 @@ Every tool takes `space` (the prefix, `alpha` for `/alpha`); omitted, the user's
 * The render script shadows `space.write*`/`delete*`. It is documented as best-effort (see the finding above): Lua in a page can still write through the runtime's browser with the user's full space rights, past the access list. Grant `x` narrowly. Rendering is for reading; a page that writes when rendered does the same when opened in the browser and is a defect of that page.
 * **Runtime lifetime**: SilverBullet keeps every runtime until restart, and only an administrator can see or stop runtimes. The server holds no admin token (section 2), so it cannot count or stop them; the number of runtimes is bounded instead by the `(user, space)` pairs the administrator allows: `x` somewhere in that space in the access list, and the Runtime API granted by SilverBullet. Each runtime costs about 200 MiB, so granting `x` is the administrator's call. Stopping idle runtimes is left to SilverBullet (see *Upstream*), to the administrator, or to a periodic restart of SilverBullet.
 * When SilverBullet offers `expandMarkdown{pageName}`, `fullPage` screenshots and `/.search`, the server uses them (feature-detected on the instance's version).
+* *Rendering in the MCP server itself* (its own Lua or Markdown engine) was rejected: queries, templates and widgets live in SilverBullet's client, and only the Runtime API runs them as the user.
 
 ### 6. Deployment
 
-One container (`node:24-alpine`, non-root, read-only root filesystem) on the same Docker network as SilverBullet, talking to `http://silverbullet:3000/<space>` directly. It is exposed through the reverse proxy on its own hostname; the MCP server checks the bearer itself. The credentials file and the access list are compose secrets. Health: `GET /healthz`. The headless Chrome runs **inside the SilverBullet container** (SilverBullet's own runtime), so the SilverBullet container's memory limit must allow ~200 MiB plus the space's index for every allowed `(user, space)` render pair.
+One container (`node:24-alpine`, non-root, read-only root filesystem) on the same Docker network as SilverBullet, talking to `http://silverbullet:3000/<space>` directly. It is exposed through the reverse proxy on its own hostname; the MCP server checks the bearer itself. The credentials file and the access list are compose secrets. Health: `GET /healthz`. The headless Chrome runs **inside the SilverBullet container** (SilverBullet's own runtime), so the SilverBullet container's memory limit must allow ~200 MiB plus the space's index for every allowed `(user, space)` render pair. Check that limit before allowing rendering for more than one or two pairs.
 
 ## Tool surface (phase 1)
 
