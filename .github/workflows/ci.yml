@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci --omit=optional
+      - run: npm ci
       - run: npm run lint
       - run: npm run test:unit
       - name: Start the SilverBullet test instance
