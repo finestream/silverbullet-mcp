@@ -1,13 +1,13 @@
 # silverbullet-mcp
 
-An MCP server for a [SilverBullet](https://silverbullet.md) instance in multi-space mode: several users, each acting as themselves, every space they may reach, and pages rendered the way SilverBullet shows them.
+An MCP server for a [SilverBullet](https://silverbullet.md) instance in multi-space mode: several agents, each acting as its own SilverBullet user, every space that user may reach, and pages rendered the way SilverBullet shows them.
 
 ## Goals
 
 One MCP server for a whole SilverBullet instance that, beyond reading and writing pages:
 
-1. serves **several users**, each with their own credential, and acts towards SilverBullet as *that* user, so that SilverBullet's permissions decide what is allowed and every write stays attributable to that user;
-2. reaches **every space** of the instance that the user may access (SilverBullet ≥ 2.10 multi-space mode, spaces addressed as `/<space>`);
+1. serves **several agents**, each with its own credential and its own SilverBullet user, and acts towards SilverBullet as *that* user, so that SilverBullet's permissions decide what is allowed and every write stays attributable to a user;
+2. reaches **every space** of the instance that the agent's user may access (SilverBullet ≥ 2.10 multi-space mode, spaces addressed as `/<space>`);
 3. returns a page **rendered**, as Markdown with `${…}` expressions, queries, templates and transclusions evaluated, and as a **screenshot** (PNG), next to the raw source;
 4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
 5. runs behind a reverse proxy with **secrets from files**, and can later verify **OAuth tokens** instead of static bearers;
