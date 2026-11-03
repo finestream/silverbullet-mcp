@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposed** (2026-10-30, revised 2026-11-03). This is the public record of the architecture of v2 of this server; it is the only architecture document, there is no second copy elsewhere. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The spike that backs this document is in [`spike/`](../spike), the test instance in [`test/`](../test).
+Status: **proposed** (2026-10-30, revised 2026-11-03). This is the public record of the architecture of v2 of this server; it is the only architecture document, there is no second copy elsewhere. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The spike scripts and the compose test instance that back the measurements below are kept on a branch of their own until the release checks absorb them.
 
 ## Goal
 
@@ -25,7 +25,7 @@ The goals are stated once, in the [README](../README.md#goals); this document sa
 
 ## Findings from the spike
 
-Measured on 2026-10-30 against `ghcr.io/silverbulletmd/silverbullet:latest` = **2.12.1** (arm64, Docker Desktop, tiny test spaces). Scripts: [`spike/render.ts`](../spike/render.ts), [`spike/measure-runtime.sh`](../spike/measure-runtime.sh).
+Measured on 2026-10-30 against `ghcr.io/silverbulletmd/silverbullet:latest` = **2.12.1** (arm64, Docker Desktop, tiny test spaces) with a render script of 17 checks and a memory measurement script, against the test instance described at the end of this document.
 
 ### Access and identity
 
@@ -44,7 +44,7 @@ The shortest working script (sent to `POST /<space>/.runtime/lua_script`):
 return markdown.expandMarkdown(space.readPage(name))
 ```
 
-It evaluates `${…}` expressions, `query[[…]]`, `template.each`/`template.new` and `![[transclusions]]`. Two gaps in 2.12.1, both handled in [`spike/render.ts`](../spike/render.ts):
+It evaluates `${…}` expressions, `query[[…]]`, `template.each`/`template.new` and `![[transclusions]]`. Two gaps in 2.12.1, both handled in the spike's render script:
 
 * **`_CTX` is not set** inside `expandMarkdown`, so pages that use `_CTX.currentPage` render an error; `editor.navigate` first does not help. The script sets a global `_CTX = {currentPage = …}` around the call, which means renders on one runtime must be **serialised**. The edge release adds an `expandMarkdown(text, {pageName = …})` option that makes the shim unnecessary.
 * **Query results come back as HTML tables** (`<table>…`), not Markdown tables. Readable for a model; converting them is optional.
@@ -204,13 +204,7 @@ Every tool checks the access list before calling SilverBullet: `r` for the read 
 
 ## Test instance
 
-```sh
-docker compose -f test/compose.yaml run --rm bootstrap   # starts SilverBullet and bootstraps it; 3–4 s from empty
-. test/.state/env                                         # SB_URL, SB_TOKEN_ALICE, SB_TOKEN_BOB, SB_TOKEN_ADMIN
-node spike/render.ts                                      # rendering, isolation and screenshot checks
-spike/measure-runtime.sh                                  # cold start and memory
-docker compose -f test/compose.yaml down -v               # reset
-```
+The measurements were taken on a compose set-up: SilverBullet 2.12 in multi-space mode, two spaces, two users with different grants, bootstrapped through the admin API in one command (3–4 s from empty, idempotent, tokens written to a git-ignored state file). It is kept on a branch of its own and comes back with the release checks.
 
 | Space | Path | alice | bob |
 |---|---|---|---|
