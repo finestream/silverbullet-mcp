@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposed** (2026-10-30, revised 2026-11-03). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The spike scripts and the compose test instance that back the measurements below are kept on a branch of their own until the release checks ([README](../README.md), *Status*) absorb them.
+Status: **proposed** (2026-10-30, revised 2026-11-03). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The terms *user* (a SilverBullet account), *person*, *agent* and *operator* are those of [security.md](security.md), section 1. The spike scripts and the compose test instance that back the measurements below are kept on a branch of their own until the release checks ([README](../README.md), *Status*) absorb them.
 
 ## Goal
 

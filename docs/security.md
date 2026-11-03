@@ -4,11 +4,13 @@ Status: **proposed** (2026-11-03). This document is the security model of the se
 
 ## 1. Threat model
 
-SilverBullet runs code from content. Every `space-lua` block on every page is loaded at client boot and reload; every `${...}` expression and every clause of a `query[[...]]` is Lua, evaluated when the page is shown, transcluded or rendered. It runs in the browser of whoever shows the page, read members included, with that session's full rights (SilverBullet's own [Security](https://silverbullet.md/Security) page, section *What write really means*, says the same). `space-style` blocks are injected into every client. A user who can write *any* page can therefore plant code that reads `CONFIG` or writes anywhere, and it runs the moment someone else opens the page. A path-based access list does not close this: it decides where a user may write, not what the written page may do.
+SilverBullet runs code from content. Every `space-lua` block on every page is loaded at client boot and reload; every `${...}` expression and every clause of a `query[[...]]` is Lua, evaluated when the page is shown, transcluded or rendered. It runs in the browser of the person who shows the page, read members included, with that person's full rights (SilverBullet's own [Security](https://silverbullet.md/Security) page, section *What write really means*, says the same). `space-style` blocks are injected into every client. An agent that can write *any* page can therefore plant code that reads `CONFIG` or writes anywhere, and it runs the moment a person opens the page. A path-based access list does not close this: it decides where an agent may write, not what the written page may do.
 
 Two more doors are not Markdown: any `*.plug.js` file in the space loads as a plug (a web worker with the user's rights through syscalls) in every client; `.html` files are served inline on the space's origin without a Content Security Policy. SilverBullet 2.12 offers no role that can edit but not script, and nothing that confines code to a folder.
 
-The model below assumes a single-tenant SilverBullet instance whose operator (the person who runs it) is trusted, and guards against every other writer, agents in particular. It does not protect the operator from the operator's own code. The threat model is public on purpose: the protection rests on the design, not on its secrecy.
+The model below assumes a single-tenant SilverBullet instance whose operator is trusted, and guards against every other writer, agents in particular. It does not protect the operator from the operator's own code. The threat model is public on purpose: the protection rests on the design, not on its secrecy.
+
+**Terms.** A **user** is a SilverBullet account with its own API token, which is what the access list and the credentials file know. Behind a user is a **person**, who works in SilverBullet's editor in a browser; an **agent**, an AI that reaches the space through this server; or a **technical user**, the scan (section 7). A person may also drive an MCP client; towards the server that identity is an agent. The **operator** is the person who runs the instance, holds SilverBullet's admin role and configures the server. A **client** is the program that holds an agent's bearer and speaks MCP to the server.
 
 ## 2. The approach
 
@@ -26,13 +28,13 @@ The server ships these conventions as [space-guidelines.md](space-guidelines.md)
 
 **The controls.** Five parts enforce the conventions; each covers what the one before it cannot.
 
-1. **The access list** (section 4) says where each user may read, write, delete and render. It keeps the server's users out of `CONFIG` and `Library/` by default, so the places that hold code are written only by the operator. It cannot say what a page may do, which is what the rest is for.
+1. **The access list** (section 4) says where each user may read, write, delete and render through the server. It keeps agents out of `CONFIG` and `Library/` by default, so the places that hold code are written only by the operator. It cannot say what a page may do, which is what the rest is for.
 2. **The write filter** (section 5) is the primary control. On every write through the server to a page outside `CONFIG` and `Library/` it parses the page that would result and refuses it if it holds code: a `space-lua`, `space-config` or `space-style` fence, a function definition, an assignment, a call to anything not on the **allowlist** (section 6), a call whose target cannot be known statically. The page never reaches the space. The filter sees only the server's route.
 3. **The scan** (section 7) runs the same filter over every page outside `CONFIG` and `Library/` on a schedule, and inventories the files that are not pages. It catches what arrived by any other route: the editor, a sync client, a checkout. In report-only mode (default) the server **refuses to serve** while findings exist (section 9), so the operator sees the problem before an agent works on a space that holds code; in quarantine mode the scan neutralises the findings instead.
-4. **The index-time transform** (section 10) is defence in depth, inside SilverBullet itself: a small block in `CONFIG` that strips the code from every `space-lua` and `space-style` object outside `CONFIG` and `Library/` before it is stored in the index, so a block that got past everything else still never loads, in any client, whoever opens the page.
+4. **The index-time transform** (section 10) is defence in depth, inside SilverBullet itself: a small block in `CONFIG` that strips the code from every `space-lua` and `space-style` object outside `CONFIG` and `Library/` before it is stored in the index, so a block that got past everything else still never loads, in any client, whichever person opens the page.
 5. **Refuse to serve** (section 9) ties them together: while a control is missing (no transform in `CONFIG`, no valid allowlist) or has findings, the server answers every tool but `list-spaces` with an error that says what to fix.
 
-**What this gives.** A page outside `CONFIG` and `Library/` runs nothing but audited code when opened, transcluded or rendered, whoever wrote it; so a render through the server, which runs with the user's full rights (section 12), is safe to grant. **What it does not give:** `${…}` expressions on a page written directly, outside the server, run until the next scan; a `*.plug.js` or `.html` file placed directly is reported, not disabled; the operator's own code in `CONFIG` and `Library/` is trusted as it is.
+**What this gives.** A page outside `CONFIG` and `Library/` runs nothing but audited code when opened, transcluded or rendered, whoever wrote it; so a render through the server, which runs with the full rights of the agent's user (section 12), is safe to grant. **What it does not give:** `${…}` expressions on a page written directly, outside the server, run until the next scan; a `*.plug.js` or `.html` file placed directly is reported, not disabled; the operator's own code in `CONFIG` and `Library/` is trusted as it is.
 
 ## 3. Identity, credentials, authentication
 
@@ -153,7 +155,7 @@ Limits and the facts behind it ([facts/index-transform.md](facts/index-transform
 
 * It is installed by hand: the server never writes `CONFIG`. It takes effect in a client only after a reindex (`Space: Reindex` in every client when it is added to an existing space); until then an index built without it keeps outside scripts and reloads run them.
 * It does not touch `${...}` expressions; those are the filter's and the scan's job.
-* `CONFIG`'s own objects cannot be dropped: the loader clears the configuration and rebuilds it from the index, so without `CONFIG@…` in the index every `config.set`, schema, command and function of `CONFIG` is lost after the first reload. `CONFIG`'s source therefore stays queryable by trusted code, which is why `CONFIG` holds no secret and why agent pages may not query the `space-lua` tag.
+* `CONFIG`'s own objects cannot be dropped: the loader clears the configuration and rebuilds it from the index, so without `CONFIG@…` in the index every `config.set`, schema, command and function of `CONFIG` is lost after the first reload. `CONFIG`'s source therefore stays queryable by trusted code, which is why `CONFIG` holds no secret and why pages written by agents may not query the `space-lua` tag.
 * A transform that *removes* outside objects (`return {}`) is defective in 2.12.1: the indexer takes the empty Lua table as an object without `ref`, throws, and drops the whole page from the index (links and tasks included). The block above keeps the object.
 * The transform touches the index of every page; it is changed like code, with tests, not like configuration.
 * The `space-lua` half is measured (reloads, reindex, headless and browser boot); the `space-style` half follows from the same code path and is not yet measured.
@@ -164,7 +166,7 @@ The defaults the server ships with, what each protects, how it can be relaxed an
 
 ## 12. Rendering
 
-A render runs with the user's full SilverBullet rights for reading and writing; it is safe to grant `x` because pages hold no code (sections 5, 7, 10). The server's blocking of write functions during a render is best-effort ([architecture.md](architecture.md), *Runtime identity*). `render-note` returns no `revision`; `edit-note` requires one, so every edit is based on the source that `read-note` returns.
+A render runs with the full SilverBullet rights of the agent's user, for reading and writing; it is safe to grant `x` because pages hold no code (sections 5, 7, 10). The server's blocking of write functions during a render is best-effort ([architecture.md](architecture.md), *Runtime identity*). `render-note` returns no `revision`; `edit-note` requires one, so every edit is based on the source that `read-note` returns.
 
 After a write, a render waits, bounded, until the runtime's index holds the new revision; if it does not arrive, the server reboots the runtime's client (`system.reboot()` through the Runtime API, as the same user), which re-indexes the space. The headless runtime was seen to lag behind the browser client in picking up writes ([facts/index-transform.md](facts/index-transform.md), *Open points*). The server cannot start or stop runtimes itself ([architecture.md](architecture.md), section 5).
 
@@ -172,7 +174,7 @@ After a write, a render waits, bounded, until the runtime's index holds the new 
 
 | Alternative | Why rejected |
 |---|---|
-| Refuse `x` where the same user has `w` | Closes the agent-triggered render, leaves the operator's browser open: the code still runs when the operator opens the page. |
+| Refuse `x` where the same user has `w` | Closes the agent-triggered render, leaves every person's browser open: the code still runs when a person opens the page. |
 | A deny list of dangerous functions as the decision | Names can be built at run time (`_G["sp".."ace"]`); only an allowlist with a rule against dynamic calls holds. The never-allowed names of section 6 guard the allowlist; they are not the decision. |
 | Every function in `Library/` allowed | Trusts plugs and imported libraries by default. |
 | The allowlist as a page in the space | As writable as any file, and the list is the critical part of the model. |

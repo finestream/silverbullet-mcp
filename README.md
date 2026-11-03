@@ -12,14 +12,14 @@ One MCP server for a whole SilverBullet instance that, beyond reading and writin
 4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
 5. runs behind a reverse proxy with **secrets from files**, and can later verify **OAuth tokens** instead of static bearers;
 6. **restricts each user further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
-7. **keeps code out of the pages its users write**, so that a page an agent wrote can be opened and rendered by anyone without running anything but audited code;
+7. **keeps code out of the pages agents write**, so that a page an agent wrote can be opened and rendered by any person without running anything but audited code;
 8. is **MIT**, with code taken only from MIT, Apache or BSD sources.
 
 It replaces a set-up of one single-user MCP server per user per space, called v1 in these documents ([Ahmad-A0/silverbullet-mcp](https://github.com/Ahmad-A0/silverbullet-mcp), one instance per identity): there, every additional identity costs one more container, and pages come back only as raw source, so queries do not show their results. How the server meets the goals is in [docs/architecture.md](docs/architecture.md).
 
 ## The security challenge
 
-SilverBullet runs code from content: every Space Lua block and every `${…}` expression on any page runs in the browser of whoever opens the page, with that reader's rights. Whoever can write one page can plant code that reads or writes everything, and a path-based access list does not close this: it decides where a user may write, not what the written page may do. The server therefore keeps code out of the pages its users write and confines it to `Library/`, with configuration in `CONFIG`; the full model is in [docs/security.md](docs/security.md).
+SilverBullet runs code from content: every Space Lua block and every `${…}` expression on any page runs in the browser of the person who opens the page, with that person's rights. An agent that can write one page can plant code that reads or writes everything, and a path-based access list does not close this: it decides where an agent may write, not what the written page may do. The server therefore keeps code out of the pages agents write and confines it to `Library/`, with configuration in `CONFIG`; the full model, and the terms *user*, *person*, *agent* and *operator* as these documents use them, are in [docs/security.md](docs/security.md).
 
 ## Posture
 
