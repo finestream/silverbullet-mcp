@@ -1,0 +1,36 @@
+# The server next to SilverBullet (docs/architecture.md, section 6): one
+# container on SilverBullet's network, secrets from files, read-only root
+# filesystem, exposed through the reverse proxy on its own hostname. Copy,
+# adjust the hostnames and paths, and keep the secrets folder root-only.
+
+services:
+  silverbullet-mcp:
+    image: ghcr.io/finestream/silverbullet-mcp:latest
+    read_only: true
+    user: "1000:1000"
+    environment:
+      SB_URL: http://silverbullet:3000
+      PORT: "4000"
+      MCP_CREDENTIALS_FILE: /run/secrets/credentials
+      MCP_CONFIG_DIR: /config
+      MCP_SCAN_INTERVAL: 15m
+      # MCP_SCAN_MODE: report      # or quarantine (docs/security.md, section 7)
+      # MCP_FILE_TYPES: .md        # the shipped default
+      # MCP_REPORT_PAGE: MCP Server
+      # MCP_RATE_LIMIT: "120"      # tool calls per user and minute
+    secrets:
+      - credentials
+    volumes:
+      - ./config:/config:ro       # access-list, allowlist (and allowed-files, if any)
+    networks:
+      - silverbullet
+    # One-off scan before go-live (docs/security.md, section 7):
+    #   docker compose run --rm silverbullet-mcp node src/main.ts --scan
+
+secrets:
+  credentials:
+    file: ./secrets/credentials
+
+networks:
+  silverbullet:
+    external: true

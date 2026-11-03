@@ -1,0 +1,22 @@
+# The access list (docs/security.md, section 4): what each agent may do
+# through this server, below what SilverBullet grants. Deny by default.
+#
+#   user-or-group   space   path          rights
+#
+# user-or-group: a user of the credentials file, or @group.
+# space: the space prefix (notes for /notes), or * for every space.
+# path: / for the whole space, an exact page name, or a folder ending in /.
+#       A page name may contain single spaces.
+# rights: letters of r (read, list, search), w (create, edit), d (delete),
+#         x (render, screenshot), or - for nothing.
+#
+# The most specific path wins; on the same path a user entry wins over group
+# entries; between groups - wins, otherwise rights add up.
+
+@agents     notes   /               r
+@agents     notes   CONFIG          -
+@agents     notes   SETTINGS        -
+@agents     notes   Library/        -
+@agents     notes   Shared/         rw
+writer-bot  notes   Shared/Bot/     rwdx
+writer-bot  notes   Shared/         rwx
