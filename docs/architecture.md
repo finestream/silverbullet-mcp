@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposed** (2026-10-30, revised 2026-11-03). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The terms *user* (a SilverBullet account), *person*, *agent* and *operator* are those of [security.md](security.md), section 1. The spike scripts and the compose test instance that back the measurements below are kept on a branch of their own until the release checks ([README](../README.md), *Status*) absorb them.
+Status: **proposed** (2026-10-30, revised 2026-11-03). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The terms *user* (a SilverBullet account), *person*, *agent* and *operator* are those of [security.md](security.md), section 1. The release checks in [`test/`](../test/) re-take the measurements below on every SilverBullet release.
 
 ## Goal
 
@@ -206,7 +206,7 @@ Changes in SilverBullet that would simplify or strengthen this architecture. Eac
 
 ## Test instance
 
-The measurements were taken on a compose set-up: SilverBullet 2.12 in multi-space mode, two spaces, two users with different grants, bootstrapped through the admin API in one command (3–4 s from empty, idempotent, tokens written to a git-ignored state file). It is kept on a branch of its own and comes back with the release checks.
+The measurements were taken on the compose set-up of [`test/`](../test/): SilverBullet 2.12 in multi-space mode, two spaces, two users with different grants, bootstrapped through the admin API in one command (idempotent, tokens written to a git-ignored state file).
 
 | Space | Path | alice | bob |
 |---|---|---|---|

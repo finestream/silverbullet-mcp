@@ -1,0 +1,9 @@
+# The write filter on SilverBullet's Lua parser
+
+The filter of the security model ([docs/security.md](../../docs/security.md), section 5), as the spike built it: can a page that carries code it should not carry be rejected with SilverBullet's own Lua parser instead of a regex? The checks in `../checks/05-parser.test.ts` run its test matrix and compare the vendored files with the upstream tag; `../checks/06-cost.test.ts` times it. It moves to the server's source when the server is built.
+
+* `filter.ts`: `checkPage(source, allowlist)` rejects `space-lua`, `space-config` and `space-style` fences; finds `${...}` directives the way SilverBullet's inline parser does; parses each body with SilverBullet's Lua parser and walks the tree: function definitions and assignments, denied names (`space`, `_G`, `load`, …), calls whose root is not on the allowlist, calls whose root cannot be known statically (`a[x](...)`, `f()(...)`, `("x"):m()`), and parse errors are all rejections.
+* `cases.ts`: the matrix of 41 cases; `run.ts` prints it as a Markdown table (`node run.ts` from this directory, after `npm install` in `test/`); `bench.ts` times a 50 KB page.
+* `vendor/silverbullet/`: four files copied unchanged from [silverbulletmd/silverbullet](https://github.com/silverbulletmd/silverbullet) at tag `2.12.1`, MIT licence (`LICENSE.md` there): the Lua grammar (`lua.grammar`), the parser lezer-generator built from it (`parse-lua.js`, `parse-lua.terms.js`) and its comment tokenizer (`lua_comment.js`). The published npm package `@silverbulletmd/silverbullet` does not ship these files, which is why they are copied.
+
+Dependencies: `@lezer/lr` and `@lezer/common` (the parser runtime), `@lezer/markdown` (fenced blocks and code spans), pinned in `../package.json` to the versions SilverBullet 2.12.1 uses.
