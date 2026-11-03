@@ -25,7 +25,7 @@ The bootstrap (`lib/bootstrap.ts`, also `node test/bootstrap.ts`) goes through t
 
 The browser checks need Chromium for Playwright: `cd test && npx playwright install chromium`. Without it they are skipped, as with `SB_BROWSER=0`. The memory measurement reads the container's cgroup through `docker exec` (container name in `SB_CONTAINER`, default `sbmcp-test-silverbullet-1`); without Docker it is skipped.
 
-On macOS without Docker Desktop, [Colima](https://github.com/abiosoft/colima) works: `brew install colima docker docker-compose`, then `colima start --cpu 2 --memory 4` (the container runs a Chromium per runtime, so 4 GB rather than the default 2). Homebrew's `docker` CLI finds the compose plugin only with `{"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]}` in `~/.docker/config.json`.
+Any Docker with Compose works; give the daemon or VM about 4 GB, since the container runs a Chromium per runtime.
 
 ## What is checked
 
