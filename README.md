@@ -27,7 +27,7 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 
 ## Status
 
-**Architectural blueprint, no server yet.** The architecture and the security model are proposed in `docs/`. Next is a test suite that checks, per SilverBullet release, the behaviour the design relies on (the *release checks*), then the server.
+**Architectural blueprint, no server yet.** The architecture and the security model are proposed in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on. Next is the server.
 
 ## What is here
 
@@ -37,8 +37,18 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 | [`docs/security.md`](docs/security.md) | Security model: threat model, access list, write filter, allowlist, scan, index-time transform, defaults |
 | [`docs/space-guidelines.md`](docs/space-guidelines.md) | Conventions a space follows when this server guards it |
 | [`docs/facts/`](docs/facts) | Measured behaviour of SilverBullet 2.12.1 that the security model rests on |
+| [`test/`](test) | The release checks: a compose test instance, a bootstrap through the admin API, one check per assumption, a report per SilverBullet version; the write filter on the vendored parser under `test/write-filter/` |
 
-The Runtime API spike, the write-filter spike and the compose test instance live on branches of their own until the release checks absorb them; the scripts behind the other facts were not kept.
+## Release checks
+
+```sh
+cd test && npm install
+docker compose -f test/compose.yaml up -d --wait      # SilverBullet on http://127.0.0.1:3300
+node test/run.ts                                      # bootstrap, all checks, report in test/report/<version>.md
+docker compose -f test/compose.yaml down -v
+```
+
+Needs Node.js ≥ 22.18. Details, another release and a run without Docker: [test/README.md](test/README.md).
 
 ## Licence
 
@@ -48,6 +58,6 @@ Code is taken only from MIT, Apache-2.0 or BSD-licensed projects and is credited
 
 ## Attributions
 
-* [SilverBullet](https://github.com/silverbulletmd/silverbullet) (MIT): the API behaviour this server relies on was read from its source and documentation; the bootstrap of the test instance follows its multi-space Runtime API end-to-end test. The write filter will vendor four files of its Lua parser unchanged (`lua.grammar`, `parse-lua.js`, `parse-lua.terms.js`, `lua_comment.js`, at tag 2.12.1) with SilverBullet's `LICENSE.md` beside them, as the write-filter spike on its own branch already does; see [docs/security.md](docs/security.md), section 5.
+* [SilverBullet](https://github.com/silverbulletmd/silverbullet) (MIT): the API behaviour this server relies on was read from its source and documentation; the bootstrap of the test instance follows its multi-space Runtime API end-to-end test. Four files of its Lua parser are vendored unchanged in `test/write-filter/vendor/silverbullet/` (`lua.grammar`, `parse-lua.js`, `parse-lua.terms.js`, `lua_comment.js`, at tag 2.12.1) with SilverBullet's `LICENSE.md` beside them; see [docs/security.md](docs/security.md), section 5.
 * [Ahmad-A0/silverbullet-mcp](https://github.com/Ahmad-A0/silverbullet-mcp) (MIT): the tool names, input schemas and the conditional `edit-note` logic (`prepareEdits`) are the model for v2's tools and will be copied, with attribution, when the server is implemented. No code copied yet.
 * [xmatthewx/silverbullet-mcp-server](https://github.com/xmatthewx/silverbullet-mcp-server) (MIT): reviewed for its OAuth flow and tool surface. No code copied.

@@ -1,5 +1,5 @@
 node_modules/
 dist/
 test/.state/
-spike/out/
 .env
+test/write-filter/out/
