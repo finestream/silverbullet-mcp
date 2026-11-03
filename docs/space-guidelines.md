@@ -1,26 +1,32 @@
 # Space guidelines
 
-The conventions a space follows when this server guards it. They bind every writer, the operator included: the server enforces them for the users it serves ([security.md](security.md), sections 5, 7 and 10), and the rest of the space keeps to them by agreement.
+The rules a space follows when this server guards it, the defaults that enforce them, and what it costs to relax each one.
 
-SilverBullet runs code from any page, in the browser of whoever opens it and with that person's rights. A space where content and code mix cannot tell a page that *says* something from a page that *does* something. These guidelines separate the two by place, so that a page can be trusted by where it is.
+These rules are **opinionated**. SilverBullet lets any page carry code and runs it in the browser of whoever opens the page, with that reader's rights; a space where content and code mix cannot tell a page that *says* something from a page that *does* something. The rules below trade that freedom for one property: a page can be trusted by where it is. They bind every writer, the operator included.
 
-## Rules
+They are **on by default**: the server ships with them enforced (the access list, the write filter, the scan, the index-time transform; [security.md](security.md), section 2). Each default can be **overridden** in the server's configuration, by the operator, by accepting the risk named next to it. The server accepts the weaker setting, says so once at start and on its report page, and keeps running. Two things cannot be switched off: the never-allowed names of the allowlist and the check that the transform is in `CONFIG`.
 
-1. **Configuration lives only in `CONFIG`.** `CONFIG` is the trusted root of a space: everything in it is readable by every script that runs there. It holds no secret; a secret is held by the server that needs it.
-2. **Code lives only in `Library/`:** Space Lua, Space Style, templates and functions. A Space Lua block anywhere else does not load (the index-time transform, [security.md](security.md), section 10).
-3. **Every other page is data:** text, frontmatter, queries and calls to allowed functions. It defines no function, assigns nothing, and holds no `space-lua`, `space-config` or `space-style` block. There is no per-page exception.
-4. **The rule is about place, not author.** A page outside `CONFIG` and `Library/` is held to rule 3 whoever wrote it.
-5. **What a page may call is an allowlist,** kept outside the space and audited by the operator entry by entry ([security.md](security.md), section 6). A page that needs more (a configuration value, the list of scripts, a dynamic tag, the network) calls a function in `Library/` written for that purpose and put on the list after audit.
-6. **Pages are the only files the server's users write.** Other file types are the operator's; a file that SilverBullet executes or serves as code (`*.plug.js`, `.html`, `.lua`) exists only where the operator put it on purpose.
-7. **The space is written through SilverBullet and the MCP server only.** No sync client or other process writes to the space folder; version control and backups only read it.
+## Rules and what they imply
 
-Rule 7 is a strong recommendation rather than something the server can enforce. The scan and the index-time transform are built for a space that can still be written directly, but a direct write is the one route the write filter never sees: a block planted on disk is found at the next scan, not refused at once.
+1. **Configuration lives only in `CONFIG`.** `CONFIG` is the trusted root of a space: everything in it is readable by every script that runs there, and its source stays queryable from the index. *Implication:* `CONFIG` holds no secret; a secret is held by the server that needs it.
+2. **Code lives only in `Library/`:** Space Lua, Space Style, templates and functions. *Implication:* a Space Lua or Space Style block anywhere else does not load, in any client; it stays visible as text, with a comment in its place in the Space Overview.
+3. **Every other page is data:** text, frontmatter, queries and calls to allowed functions. It defines no function, assigns nothing, and holds no `space-lua`, `space-config` or `space-style` block. *Implication:* a page copied in from another space may be refused for a block that would have been inert anyway; the error names the line, and the fix is to fence it as `lua` or to move it to `Library/`.
+4. **The rule is about place, not author.** A page outside `CONFIG` and `Library/` is held to rule 3 whoever wrote it. *Implication:* the operator's own pages follow rule 3 too; a page that reads configuration or scripts directly moves that into a Library function. There is no per-page exception: a tag that allowed code on one page would be writable by whoever writes the page.
+5. **What a page may call is an allowlist,** kept outside the space and audited by the operator entry by entry. *Implication:* a page that needs more (a configuration value, the list of scripts, a dynamic tag, the network) calls a function in `Library/` written for that purpose and put on the list after audit; that function treats what it receives as data. A method on a value is written as a function call (`string.upper(x)`), because the filter cannot know the value's type.
+6. **Pages are the only files the server's users write.** Other file types are the operator's; a file that SilverBullet executes or serves as code (`*.plug.js`, `.html`, `.lua`) exists only where the operator put it on purpose. *Implication:* such a file found by the scan is reported, never changed; the operator removes it or allows it by path.
+7. **The space is written through SilverBullet and the MCP server only.** No sync client or other process writes to the space folder; version control and backups only read it. *Implication:* this is the one rule the server cannot enforce. A page written directly bypasses the write filter; its blocks are kept from loading by the transform, its expressions run until the next scan finds them.
 
-## What follows
+## Defaults and overrides
 
-* A page outside `Library/` can be rendered, transcluded or opened by anyone without running anything but audited code.
-* The operator's pages follow rule 3 too: a page that reads configuration or scripts directly moves that into a Library function.
-* The server refuses its users' pages that break rule 3, reports pages and files that break rules 3 and 6 on the report page, and keeps blocks outside `Library/` from loading.
+| Default | What it protects | Override | Risk accepted |
+|---|---|---|---|
+| Access list deny by default; the group `agents` has `r` on the space and `-` on `CONFIG`, `SETTINGS` and `Library/` | The places that hold code are written only by the operator; a user sees and touches only what the operator granted | Grant `w` on `Library/`, or `rw` where the operator chooses | A user with `w` on `Library/` writes code that loads in every client with every reader's rights; the write filter does not apply there, because `Library/` is where code belongs |
+| Write filter on every write, with the shipped allowlist (`query`, `template.*`, `templates.*`, `index.*`, `views.*`, `string.*`) | A page written through the server holds no code and calls only audited functions | Add entries, as `name`, `name.*` or `*.method` | Every entry is code a page may run with the reader's rights; an entry that evaluates its input, reads a page named by its argument or reaches the network is the same hole one level up. `*.method` entries allow that method on values of any type |
+| File types `.md` only | Nothing but pages is written through the server; types that execute or are served as code never are | Add types (for example `.png`, `.csv`) | Larger surface for what arrives through the server; a type SilverBullet executes or serves as code cannot be added at all |
+| Scan on, on a schedule shorter than a browser session | Code that arrived by any route is found before the next client boot loads it, and the server refuses to serve until the operator has looked | Scan off | Code written directly to the space stays until someone notices; the server serves a space that may hold code |
+| Scan in report-only mode | No page but the report page is ever changed by the server | Quarantine mode | The scan edits pages: a fence becomes a `lua` fence, an expression is wrapped in backticks, the page is tagged. Reversible by hand only; a page the operator was editing may change under them |
+| Transform block in `CONFIG`, checked at start | A block outside `CONFIG` and `Library/` never loads, whatever route it took | None; the check cannot be switched off | — |
+| Never-allowed names on the allowlist | A configuration mistake cannot admit `space.*`, `config.*`, the loaders, the metatable functions or the registries | None | — |
 
 ## Alternatives considered
 

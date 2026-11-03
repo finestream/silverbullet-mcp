@@ -4,15 +4,17 @@ Status: **proposed** (2026-11-03). This document is the security model of the se
 
 ## 1. Threat model
 
-SilverBullet runs code from content. Every `space-lua` block on every page is loaded at client boot and reload; every `${...}` expression and every clause of a `query[[...]]` is Lua, evaluated when the page is shown, transcluded or rendered. It runs in the browser of whoever shows the page, read members included, with that session's full rights (SilverBullet 2.12, *Security*, *What write really means*). `space-style` blocks are injected into every client. A user who can write *any* page can therefore plant code that reads `CONFIG` or writes anywhere, and it runs the moment someone else opens the page. A path-based access list does not close this: it decides where a user may write, not what the written page may do.
+SilverBullet runs code from content. Every `space-lua` block on every page is loaded at client boot and reload; every `${...}` expression and every clause of a `query[[...]]` is Lua, evaluated when the page is shown, transcluded or rendered. It runs in the browser of whoever shows the page, read members included, with that session's full rights (SilverBullet's own [Security](https://silverbullet.md/Security) page, section *What write really means*, says the same). `space-style` blocks are injected into every client. A user who can write *any* page can therefore plant code that reads `CONFIG` or writes anywhere, and it runs the moment someone else opens the page. A path-based access list does not close this: it decides where a user may write, not what the written page may do.
 
 Two more doors are not Markdown: any `*.plug.js` file in the space loads as a plug (a web worker with the user's rights through syscalls) in every client; `.html` files are served inline on the space's origin without a Content Security Policy. SilverBullet 2.12 offers no role that can edit but not script, and nothing that confines code to a folder.
 
 The model below assumes a single-tenant SilverBullet instance whose operator (the person who runs it) is trusted, and guards against every other writer, agents in particular. It does not protect the operator from the operator's own code. The threat model is public on purpose: the protection rests on the design, not on its secrecy.
 
-## 2. Conventions the server assumes
+## 2. The approach
 
-Content and code are separated by *place*, not by author:
+SilverBullet cannot tell a page that *says* something from a page that *does* something, and it cannot be told to. The server therefore makes the distinction itself, by **place**: a few places hold code, every other page is data, and whatever reaches a data page is checked for code. Nothing in the model depends on who wrote a page; it depends only on where the page is.
+
+**The conventions.** Content and code are separated by place, not by author:
 
 * configuration only in `CONFIG`; `CONFIG` is the trusted root, readable by every script, and holds no secret;
 * code (Space Lua, Space Style, templates, functions) only in `Library/`;
@@ -20,7 +22,17 @@ Content and code are separated by *place*, not by author:
 * non-page files that execute or are served as code exist only where the operator put them on purpose;
 * the space is written through SilverBullet and the MCP server only. This is a strong recommendation, with this rationale: the scan and the transform are built for a space that can still be written directly, but direct writes are the one route the write filter does not see.
 
-The server ships these conventions as [space-guidelines.md](space-guidelines.md), for any space it guards.
+The server ships these conventions as [space-guidelines.md](space-guidelines.md), with the defaults that enforce them and what it costs to relax each one.
+
+**The controls.** Five parts enforce the conventions; each covers what the one before it cannot.
+
+1. **The access list** (section 4) says where each user may read, write, delete and render. It keeps the server's users out of `CONFIG` and `Library/` by default, so the places that hold code are written only by the operator. It cannot say what a page may do, which is what the rest is for.
+2. **The write filter** (section 5) is the primary control. On every write through the server it parses the page that would result and refuses it if it holds code: a code fence, a function definition, an assignment, a call to anything not on the **allowlist** (section 6), a call whose target cannot be known statically. The page never reaches the space. The filter sees only the server's route.
+3. **The scan** (section 7) runs the same filter over every page outside `CONFIG` and `Library/` on a schedule, and inventories the files that are not pages. It catches what arrived by any other route: the editor, a sync client, a checkout. It reports (default) or quarantines; while it has findings the server **refuses to serve** (section 9), so the operator sees the problem before an agent works on a space that holds code.
+4. **The index-time transform** (section 10) is defence in depth, inside SilverBullet itself: a small block in `CONFIG` that strips the code from every `space-lua` and `space-style` object outside `CONFIG` and `Library/` before it is stored in the index, so a block that got past everything else still never loads, in any client, whoever opens the page.
+5. **Refuse to serve** (section 9) ties them together: while a control is missing (no transform in `CONFIG`, no valid allowlist) or has findings, the server answers every tool but `list-spaces` with an error that says what to fix.
+
+**What this gives.** A page outside `CONFIG` and `Library/` runs nothing but audited code when opened, transcluded or rendered, whoever wrote it; so a render through the server, which runs with the user's full rights (section 12), is safe to grant. **What it does not give:** `${…}` expressions on a page written directly, outside the server, run until the next scan; a `*.plug.js` or `.html` file placed directly is reported, not disabled; the operator's own code in `CONFIG` and `Library/` is trusted as it is.
 
 ## 3. Identity, credentials, authentication
 
@@ -68,14 +80,15 @@ The primary security feature. On every `create-note` and `edit-note` the server 
 
 **Stricter than SilverBullet, on purpose:** fences inside HTML comments, directives inside frontmatter and HTML blocks, and unbalanced `${` are all checked or rejected although SilverBullet treats them as inert. A page copied in from elsewhere may be refused for an inert block; the error says so.
 
-**File types.** The server writes only allowlisted file types; shipped default `.md` only. A type SilverBullet executes or serves as code (`*.plug.js`, `.html`, `.lua`) can never be on that list. Rendering and screenshots are `.md` only. Reading is any type, within the access list.
+**File types.** The server writes only allowlisted file types; shipped default `.md` only. A type SilverBullet executes or serves as code (`*.plug.js`, `.html`, `.lua`) can never be on that list. `render-note` and `screenshot-note` accept pages (`.md`) only; other file types can be read, within the access list, but not rendered.
 
 ## 6. The allowlist
 
 * A configuration file of the server, outside the space. It names functions as `name` or `name.*` and governs references, not only calls.
 * Every entry is audited by the operator before it is added; code in `Library/` or in a plug is never allowed by virtue of its place.
 * Shipped default: `query`, `template.*`, `templates.*`, `index.*`, `views.*`, `string.*`.
-* Never on the list, whatever the configuration says: `config.*`, `space.*`, `net.*`, `shell.*`, `js`, `load`, `loadstring`, `dofile`, `require`, `_G`, `rawget`, `rawset`, `rawequal`, `rawlen`, `getmetatable`, `setmetatable`, `os`, `io`, `debug`, `package`, `system`, `editor`, `datastore`, `clientStore`, `event`, `sync`.
+* **Allowlist first, never-allowed names as a guard.** The filter's logic is the allowlist alone: a name that is not on it is refused. The never-allowed names below do not add a second decision at filter time; they guard the allowlist itself. When the server validates the file at start, an entry that names one of them, covers one of them (`config.*`, or a bare `*`) or is one of them makes the file invalid, and the server refuses to serve (section 9). The list is maintained with SilverBullet's releases, as part of the release checks: a new API that reads, writes, registers code or reaches outside the page goes on it.
+* Never allowed, whatever the configuration says: `config.*`, `space.*`, `net.*`, `shell.*`, `js`, `load`, `loadstring`, `dofile`, `require`, `_G`, `rawget`, `rawset`, `rawequal`, `rawlen`, `getmetatable`, `setmetatable`, `os`, `io`, `debug`, `package`, `system`, `editor`, `datastore`, `clientStore`, `event`, `sync`, and the registries `tag.*`, `command.*`, `schema.*`: they take Lua callbacks (an index transform, a command, a validator) and store them in the configuration of whoever views the page, so a data page could register code without a single code fence. Whether a transform registered this way could turn another tag's objects into executable ones is untested; the rule does not depend on it.
 * A method on a value is written as a function call (`string.upper(x)`), because the filter cannot know the type of `p.name` in `p.name:upper()`. The format allows an entry such as `*.upper` for operators who want the method form; none is shipped.
 * A page that needs more than the list offers calls a function in `Library/` written for that purpose and put on the list after audit. Library functions treat what they receive (arguments, frontmatter, page names) as data.
 * The server validates the file at start; an invalid or missing file is a refuse-to-serve condition (section 9).
@@ -85,7 +98,7 @@ The primary security feature. On every `create-note` and `edit-note` the server 
 The server runs the filter of section 5 over every page outside `CONFIG` and `Library/`, and inventories every file that is not a page, at start and on a schedule shorter than a typical browser session, since blocks load at boot and reload only.
 
 * It runs as a technical SilverBullet user (`scan`), a write member of the space whose token is in the credentials file. It is the server's own deterministic code, not an agent: it does not go through the access list; what it may touch is fixed in code (`CONFIG` and `Library/` never) and configuration.
-* **Report-only** (shipped default): findings are written to the report page (section 8) and the log; the server refuses to serve agents while findings exist (section 9). No page but the report page is changed.
+* **Report-only** (shipped default): findings are written to the report page (section 8) and the log; the server refuses to serve while findings exist (section 9). No page but the report page is changed.
 * **Quarantine** (operator choice): a `space-lua`, `space-config` or `space-style` fence becomes a `lua` fence; an offending expression is wrapped in backticks; the page is tagged `#quarantined`. Both neutralisations are inert in SilverBullet and keep the text visible. A quarantine is reversed only by hand; the scan never undoes one.
 * Non-page files are reported, never changed. An operator allow entry (a path list beside the allowlist) silences a known file.
 * **CLI mode:** the scan also serves installation. It runs once over an existing space before the server goes live, so the operator fixes pages before agents arrive.
@@ -144,7 +157,7 @@ Limits and the facts behind it ([facts/index-transform.md](facts/index-transform
 
 ## 11. Shipped defaults and warnings
 
-The server ships with: the deny-by-default access list and the group `agents` (section 4); the allowlist of section 6; file types `.md`; scan on, report-only; the transform block and its check; the report page. It accepts a weaker configuration (`w` on `Library/`, further allowlist entries, `*.method` entries, more file types, scan off or in quarantine mode) and says so once at start, in the log and on the report page. Like a distribution's default permissions: sensible, changeable in both directions, visible when changed.
+The defaults the server ships with, what each protects, how it can be relaxed and the risk that relaxing it accepts are in [space-guidelines.md](space-guidelines.md), *Defaults and overrides*, next to the rules they enforce. What stays here is the mechanism: the server validates its configuration at start; a setting weaker than the default is accepted and reported once, in the log and on the report page (section 8), so that a relaxed posture is always visible; the never-allowed names (section 6) and the transform check (section 9) cannot be switched off.
 
 ## 12. Rendering
 
@@ -157,7 +170,7 @@ After a write, a render waits, bounded, until the runtime's index holds the new 
 | Alternative | Why rejected |
 |---|---|
 | Refuse `x` where the same user has `w` | Closes the agent-triggered render, leaves the operator's browser open: the code still runs when the operator opens the page. |
-| A deny list of dangerous functions | Names can be built at run time (`_G["sp".."ace"]`); only an allowlist with a rule against dynamic calls holds. |
+| A deny list of dangerous functions as the decision | Names can be built at run time (`_G["sp".."ace"]`); only an allowlist with a rule against dynamic calls holds. The never-allowed names of section 6 guard the allowlist; they are not the decision. |
 | Every function in `Library/` allowed | Trusts plugs and imported libraries by default. |
 | The allowlist as a page in the space | As writable as any file, and the list is the critical part of the model. |
 | Dropping `CONFIG`'s objects from the index | Breaks the configuration after the first reload (section 10). |

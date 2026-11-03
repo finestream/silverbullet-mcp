@@ -23,7 +23,7 @@ SilverBullet runs code from content: every Space Lua block and every `${…}` ex
 
 ## Posture
 
-The server ships strict: deny-by-default access list, a write filter on every write, an allowlist of the functions a page may call, a scan of the space in report-only mode, and an index-time transform in `CONFIG` that keeps blocks outside `Library/` from loading. Every part can be relaxed (write access to `Library/`, more allowlist entries, more file types, scan off or in quarantine mode), and the server says so at start. The default posture and its relaxations are in [docs/security.md](docs/security.md), *Shipped defaults and warnings*; the conventions a guarded space follows in [docs/space-guidelines.md](docs/space-guidelines.md).
+The server ships strict: deny-by-default access list, a write filter on every write, an allowlist of the functions a page may call, a scan of the space in report-only mode, and an index-time transform in `CONFIG` that keeps blocks outside `Library/` from loading. Every part can be relaxed (write access to `Library/`, more allowlist entries, more file types, scan off or in quarantine mode), and the server says so at start. The rules, the defaults that enforce them, and what relaxing each one accepts are in [docs/space-guidelines.md](docs/space-guidelines.md); how the controls work is in [docs/security.md](docs/security.md).
 
 ## Status
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposed** (2026-10-30, revised 2026-11-03). This is the public record of the architecture of v2 of this server; it is the only architecture document, there is no second copy elsewhere. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The spike scripts and the compose test instance that back the measurements below are kept on a branch of their own until the release checks absorb them.
+Status: **proposed** (2026-10-30, revised 2026-11-03). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The spike scripts and the compose test instance that back the measurements below are kept on a branch of their own until the release checks absorb them.
 
 ## Goal
 
@@ -76,7 +76,7 @@ About **175 MiB per runtime** for tiny spaces; it grows with the space (the clie
 * The runtime runs as the token's user: from alice's `alpha` runtime, `fetch("/beta/.fs/Secret.md")` returns `401` (its cookie is scoped to `/alpha`); alice's call to `/beta/.runtime/*` returns `403`.
 * The Runtime API **requires Write**: a read-only member gets `403`. Rendering is therefore available only where the user may write.
 * A page whose expression writes (`${space.writePage(…)}`) **does write** when rendered unguarded, exactly as when the user opens it in the browser.
-* Shadowing the `space.write*`/`delete*` functions during the render blocks that (the expression renders as `**Error:** rendering is read-only`). It is **best-effort**: Lua in a page can still reach `js.window.fetch` and `PUT` a file with the runtime's credentials. A read-only guarantee needs SilverBullet to offer a read-only runtime (see *Upstream*).
+* Shadowing the `space.write*`/`delete*` functions during the render blocks that (the expression renders as `**Error:** rendering is read-only`). It is **best-effort**: Lua in a page can still reach `js.window.fetch` and `PUT` a file with the runtime's credentials. A read-only guarantee needs SilverBullet to offer a read-only runtime (see *Possible improvements in SilverBullet*).
 
 ### Search
 
@@ -127,7 +127,7 @@ client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverB
 **No admin token.** The server holds only the users' own SilverBullet tokens. Rejected alternatives:
 
 * *Mint SilverBullet tokens with an admin token*: one shared admin credential in the server, and writes no longer attributable to a user's own token.
-* *An admin token only to stop idle runtimes*: SilverBullet's admin API accepts no narrower token, so it would be a full admin credential for one housekeeping task. Revisit if SilverBullet adds idle shutdown or a narrower role (see *Upstream*).
+* *An admin token only to stop idle runtimes*: SilverBullet's admin API accepts no narrower token, so it would be a full admin credential for one housekeeping task. Revisit if SilverBullet adds idle shutdown or a narrower role (see *Possible improvements in SilverBullet*).
 
 ### 3. Access control: SilverBullet is the ceiling, an access list below it
 
@@ -161,7 +161,7 @@ Every tool takes `space` (the prefix, `alpha` for `/alpha`); omitted, the user's
 * **Rendering is for reading; editing works on the source.** `read-note` returns the raw Markdown as stored, with its `revision`; `render-note` returns the expansion and no `revision`, and `edit-note` requires one, so every edit is based on the source. After a write, a render waits (bounded) until the runtime's index holds the new revision, with a fresh runtime as fallback ([security.md](security.md), section 12).
 * One **queue per `(user, space)`**: renders and screenshots on the same runtime run one at a time (the `_CTX` shim and navigate-then-capture are not concurrent-safe).
 * The render script shadows `space.write*`/`delete*`. It is documented as best-effort (see the finding above): Lua in a page can still write through the runtime's browser with the user's full space rights, past the access list. What makes `x` safe to grant is that pages hold no code: the write filter, the scan and the index-time transform ([security.md](security.md), sections 5, 7 and 10). A page that writes when rendered does the same when opened in the browser and is a defect of that page.
-* **Runtime lifetime**: SilverBullet keeps every runtime until restart, and only an administrator can see or stop runtimes. The server holds no admin token (section 2), so it cannot count or stop them; the number of runtimes is bounded instead by the `(user, space)` pairs the administrator allows: `x` somewhere in that space in the access list, and the Runtime API granted by SilverBullet. Each runtime costs about 200 MiB, so granting `x` is the administrator's call. Stopping idle runtimes is left to SilverBullet (see *Upstream*), to the administrator, or to a periodic restart of SilverBullet.
+* **Runtime lifetime**: SilverBullet keeps every runtime until restart, and only an administrator can see or stop runtimes. The server holds no admin token (section 2), so it cannot count or stop them; the number of runtimes is bounded instead by the `(user, space)` pairs the administrator allows: `x` somewhere in that space in the access list, and the Runtime API granted by SilverBullet. Each runtime costs about 200 MiB, so granting `x` is the administrator's call. Stopping idle runtimes is left to SilverBullet (see *Possible improvements in SilverBullet*), to the administrator, or to a periodic restart of SilverBullet.
 * When SilverBullet offers `expandMarkdown{pageName}`, `fullPage` screenshots and `/.search`, the server uses them (feature-detected on the instance's version).
 * *Rendering in the MCP server itself* (its own Lua or Markdown engine) was rejected: queries, templates and widgets live in SilverBullet's client, and only the Runtime API runs them as the user.
 
@@ -188,7 +188,9 @@ Every tool checks the access list before calling SilverBullet: `r` for the read 
 
 `search-replace-note` from v1 is not carried over: it replaces case-insensitively everywhere without a revision check, and `edit-note` covers its use.
 
-## Upstream (SilverBullet) requests worth making
+## Possible improvements in SilverBullet
+
+Changes in SilverBullet that would simplify or strengthen this architecture. Each is a candidate for a proposal upstream; until then the architecture works around it as described above.
 
 1. **Read-only runtime**: a Runtime API mode whose headless client holds only read access (or a runtime for read-only members). It would make "a render must not write" enforceable and allow rendering for read-only members.
 2. **Idle shutdown of runtimes** (for example `SB_RUNTIME_IDLE_TIMEOUT`), so that runtimes started for occasional renders do not stay resident until restart.
@@ -198,8 +200,8 @@ Every tool checks the access list before calling SilverBullet: `r` for the read 
 
 ## Open points for later tasks
 
-* Index readiness on a large space at a runtime's first call (1b): measure, and wait for the index if needed.
-* HTML tables in rendered Markdown: leave as is or convert (1b).
+* Index readiness on a large space at a runtime's first call: measure, and wait for the index if needed (rendering).
+* HTML tables in rendered Markdown: leave as is or convert (rendering).
 * Which OAuth client registration the clients need from the identity provider (dynamic client registration or client ID metadata documents) (phase 2).
 
 ## Test instance
