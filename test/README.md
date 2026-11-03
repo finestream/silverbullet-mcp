@@ -23,7 +23,9 @@ SB_URL=http://127.0.0.1:3300 SB_ADMIN_PASSWORD=<password> node test/run.ts
 
 The bootstrap (`lib/bootstrap.ts`, also `node test/bootstrap.ts`) goes through the admin API: Runtime API on, users `alice` and `bob`, spaces `alpha` and `beta`, one API token per user, the seed pages of `seed/`, and the `CONFIG` page of `alpha` with the shipped transform block. Tokens land in `.state/env` (git-ignored). A second run keeps what exists. `node test/run.ts index parser` runs only the check files whose name contains one of the words.
 
-The browser checks need Chromium for Playwright: `cd test && npx playwright install chromium`. Without it they are skipped, as with `SB_BROWSER=0`.
+The browser checks need Chromium for Playwright: `cd test && npx playwright install chromium`. Without it they are skipped, as with `SB_BROWSER=0`. The memory measurement reads the container's cgroup through `docker exec` (container name in `SB_CONTAINER`, default `sbmcp-test-silverbullet-1`); without Docker it is skipped.
+
+On macOS without Docker Desktop, [Colima](https://github.com/abiosoft/colima) works: `brew install colima docker docker-compose`, then `colima start --cpu 2 --memory 4` (the container runs a Chromium per runtime, so 4 GB rather than the default 2). Homebrew's `docker` CLI finds the compose plugin only with `{"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]}` in `~/.docker/config.json`.
 
 ## What is checked
 

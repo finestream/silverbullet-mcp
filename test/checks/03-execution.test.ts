@@ -9,7 +9,7 @@ import { renderScript } from "../lib/lua.ts";
 
 before(async () => {
   await sb.admin.resetRuntimes(T.admin);
-  await sb.lua(T.alice, S.alpha, "return 1");
+  await sb.runtimeReady(T.alice, S.alpha);
 });
 
 test("execution: only space-lua and space-style fences are indexed as objects; space-config is inert (section 1)", async () => {

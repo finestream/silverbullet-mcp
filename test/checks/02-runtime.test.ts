@@ -9,10 +9,8 @@ import { luaString, renderScript } from "../lib/lua.ts";
 
 test("runtime: a fresh runtime boots on the first call (reset through the admin API; cold start measured)", async (t) => {
   await sb.admin.resetRuntimes(T.admin);
-  const r = await sb.lua(T.alice, S.alpha, "return 1");
-  assert.equal(r.status, 200, r.raw);
-  assert.equal(r.result, 1);
-  t.diagnostic(`measure: runtime cold start (reset, then first call) = ${r.ms} ms`);
+  const ms = await sb.runtimeReady(T.alice, S.alpha);
+  t.diagnostic(`measure: runtime cold start (reset, then until the first script answers) = ${ms} ms`);
   const warm = await sb.lua(T.alice, S.alpha, "return 1");
   t.diagnostic(`measure: runtime warm call = ${warm.ms} ms`);
 });

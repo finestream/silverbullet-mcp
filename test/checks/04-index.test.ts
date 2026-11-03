@@ -31,7 +31,7 @@ const reindexAndReload = async () => {
 };
 const freshRuntime = async () => {
   await sb.admin.resetRuntimes(T.admin);
-  await sb.lua(T.alice, S.alpha, "return 1");
+  await sb.runtimeReady(T.alice, S.alpha);
 };
 
 after(async () => {

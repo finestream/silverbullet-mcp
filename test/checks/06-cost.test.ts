@@ -4,8 +4,10 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { parser as mdParser } from "@lezer/markdown";
 import { checkPage } from "../write-filter/filter.ts";
+import { sb, T } from "../lib/env.ts";
 
 const chunk = `## Section
 
@@ -51,6 +53,17 @@ test("cost: the write filter checks a 50 KB page with ~200 directives in well un
   assert.ok(full < 100, `${full.toFixed(1)} ms per 50 KB page`);
 });
 
-test("cost: memory per runtime", (t) => {
-  t.skip("not measured here: needs the container's cgroup (about 175 MiB per runtime was measured on 2.12.1 in Docker)");
+test("cost: memory of the SilverBullet container with its runtimes (from the container's cgroup; needs Docker)", async (t) => {
+  const container = process.env.SB_CONTAINER ?? "sbmcp-test-silverbullet-1";
+  let bytes: number;
+  try {
+    bytes = Number(execFileSync("docker", ["exec", container, "cat", "/sys/fs/cgroup/memory.current"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
+  } catch {
+    return t.skip(`not measured: no Docker container ${container} reachable (SB_CONTAINER to name it)`);
+  }
+  const runtimes = (await sb.admin.runtimes(T.admin)).length;
+  const mib = Math.round(bytes / 1048576);
+  t.diagnostic(`measure: container memory with ${runtimes} runtime(s) = ${mib} MiB`);
+  assert.ok(runtimes > 0, "at least one runtime is alive after the runtime checks");
+  assert.ok(mib / runtimes < 1024, `${Math.round(mib / runtimes)} MiB per runtime: an order of magnitude above the 175 MiB measured on 2.12.1`);
 });

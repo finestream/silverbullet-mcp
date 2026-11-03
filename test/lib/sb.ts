@@ -60,6 +60,21 @@ export function client(url: string) {
       return { status: r.status, result: body.result, error: body.error, ms: Math.round(performance.now() - t0), raw };
     },
 
+    /**
+     * Waits until the user's runtime for the space answers a script (after a reset the server
+     * answers "runtime not ready" for a while). Returns the time it took, or throws.
+     */
+    async runtimeReady(token: string, space: string, timeoutMs = 120000): Promise<number> {
+      const t0 = performance.now();
+      let last: LuaResult | undefined;
+      while (performance.now() - t0 < timeoutMs) {
+        last = await sb.lua(token, space, "return 1");
+        if (last.status === 200 && last.result === 1) return Math.round(performance.now() - t0);
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      throw new Error(`runtime for ${space} not ready after ${timeoutMs} ms: ${last?.raw}`);
+    },
+
     async screenshot(token: string, space: string, query = "") {
       const t0 = performance.now();
       const r = await fetch(`${url}/${space}/.runtime/screenshot${query}`, { headers: auth(token) });
