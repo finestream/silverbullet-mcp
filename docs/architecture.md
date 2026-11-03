@@ -131,7 +131,7 @@ client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverB
 
 ### 3. Access control: SilverBullet is the ceiling, an access list below it
 
-SilverBullet grants rights per space. The server passes SilverBullet's refusals (`401`, `403`, `404`, `412`) through as clear messages (for example "no write access to space alpha"; a refusal by the access list says so, too) and never widens them. Below that ceiling an **access list** beside the credentials file says, per user or group, space and path, what the user may do through the MCP server:
+SilverBullet grants rights per space. The server passes SilverBullet's refusals (`401`, `403`, `404`, `412`) through as clear messages (for example "no write access to space alpha"; a refusal by the access list says so, too) and never widens them. Below that ceiling an **access list** beside the credentials file says, per user or group, space and path, what an agent may do through the MCP server (a person in SilverBullet's editor is not affected):
 
 | Right | Allows |
 |---|---|

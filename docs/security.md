@@ -28,7 +28,7 @@ The server ships these conventions as [space-guidelines.md](space-guidelines.md)
 
 **The controls.** Five parts enforce the conventions; each covers what the one before it cannot.
 
-1. **The access list** (section 4) says where each user may read, write, delete and render through the server. It keeps agents out of `CONFIG` and `Library/` by default, so the places that hold code are written only by the operator. It cannot say what a page may do, which is what the rest is for.
+1. **The access list** (section 4) says where each agent may read, write, delete and render. Its entries are per user or group, but it binds only the server's route: a person in SilverBullet's editor has SilverBullet's rights, untouched. It keeps agents out of `CONFIG` and `Library/` by default, so the places that hold code are written only by persons, the operator above all. It cannot say what a page may do, which is what the rest is for.
 2. **The write filter** (section 5) is the primary control. On every write through the server to a page outside `CONFIG` and `Library/` it parses the page that would result and refuses it if it holds code: a `space-lua`, `space-config` or `space-style` fence, a function definition, an assignment, a call to anything not on the **allowlist** (section 6), a call whose target cannot be known statically. The page never reaches the space. The filter sees only the server's route.
 3. **The scan** (section 7) runs the same filter over every page outside `CONFIG` and `Library/` on a schedule, and inventories the files that are not pages. It catches what arrived by any other route: the editor, a sync client, a checkout. In report-only mode (default) the server **refuses to serve** while findings exist (section 9), so the operator sees the problem before an agent works on a space that holds code; in quarantine mode the scan neutralises the findings instead.
 4. **The index-time transform** (section 10) is defence in depth, inside SilverBullet itself: a small block in `CONFIG` that strips the code from every `space-lua` and `space-style` object outside `CONFIG` and `Library/` before it is stored in the index, so a block that got past everything else still never loads, in any client, whichever person opens the page.
@@ -44,7 +44,7 @@ The server ships these conventions as [space-guidelines.md](space-guidelines.md)
 
 ## 4. Access list
 
-* Rights per user or group, space and path: `r` read, `w` create and edit, `d` delete, `x` render, `-` no access.
+* Rights per user or group, space and path: `r` read, `w` create and edit, `d` delete, `x` render, `-` no access. The list restricts agents only: it is checked on the server's route and nowhere else; a person in SilverBullet's editor is bound by SilverBullet's own rights.
 * A path is the whole space (written `/`), an exact page, or a folder ending in `/`.
 * Deny by default: without an entry, nothing is allowed.
 * The most specific path wins; on the same path a user entry wins over group entries; between groups `-` wins, otherwise rights add up.

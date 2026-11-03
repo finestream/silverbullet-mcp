@@ -11,7 +11,7 @@ One MCP server for a whole SilverBullet instance that, beyond reading and writin
 3. returns a page **rendered**, as Markdown with `${…}` expressions, queries, templates and transclusions evaluated, and as a **screenshot** (PNG), next to the raw source;
 4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
 5. runs behind a reverse proxy with **secrets from files**, and can later verify **OAuth tokens** instead of static bearers;
-6. **restricts each user further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
+6. **restricts each agent further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
 7. **keeps code out of the pages agents write**, so that a page an agent wrote can be opened and rendered by any person without running anything but audited code;
 8. is **MIT**, with code taken only from MIT, Apache or BSD sources.
 
