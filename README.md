@@ -2,18 +2,43 @@
 
 An MCP server for a [SilverBullet](https://silverbullet.md) instance in multi-space mode: several users, each acting as themselves, every space they may reach, and pages rendered the way SilverBullet shows them.
 
-**Status: architecture and security model proposed, no server yet.** The decision, the reasons and the spike measurements are in [docs/architecture.md](docs/architecture.md); the security model in [docs/security.md](docs/security.md).
+## Goals
+
+One MCP server for a whole SilverBullet instance that, beyond reading and writing pages:
+
+1. serves **several users**, each with their own credential, and acts towards SilverBullet as *that* user, so that SilverBullet's permissions decide what is allowed and every write stays attributable to that user;
+2. reaches **every space** of the instance that the user may access (SilverBullet ≥ 2.10 multi-space mode, spaces addressed as `/<space>`);
+3. returns a page **rendered**, as Markdown with `${…}` expressions, queries, templates and transclusions evaluated, and as a **screenshot** (PNG), next to the raw source;
+4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
+5. runs behind a reverse proxy with **secrets from files**, and can later verify **OAuth tokens** instead of static bearers;
+6. **restricts each user further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
+7. **keeps code out of the pages its users write**, so that a page an agent wrote can be opened and rendered by anyone without running anything but audited code;
+8. is **MIT**, with code taken only from MIT, Apache or BSD sources.
+
+It replaces a set-up of one single-user MCP server per user per space: there, every additional identity costs one more container, and pages come back only as raw source, so queries do not show their results. How the server meets the goals is in [docs/architecture.md](docs/architecture.md).
+
+## The security challenge
+
+SilverBullet runs code from content: every Space Lua block and every `${…}` expression on any page runs in the browser of whoever opens the page, with that reader's rights. Whoever can write one page can plant code that reads or writes everything, and a path-based access list does not close this: it decides where a user may write, not what the written page may do. The server therefore keeps code out of the pages its users write and confines it to `Library/`; the full model is in [docs/security.md](docs/security.md).
+
+## Posture
+
+The server ships strict: deny-by-default access list, a write filter on every write, an allowlist of the functions a page may call, a scan of the space in report-only mode, and an index-time transform in `CONFIG` that keeps blocks outside `Library/` from loading. Every part can be relaxed (write access to `Library/`, more allowlist entries, more file types, scan off or in quarantine mode), and the server says so at start. The default posture and its relaxations are in [docs/security.md](docs/security.md), *Shipped defaults and warnings*; the conventions a guarded space follows in [docs/space-guidelines.md](docs/space-guidelines.md).
+
+## Status
+
+**Architectural blueprint, no server yet.** The architecture and the security model are proposed in `docs/`. Next is a test suite that checks, per SilverBullet release, the behaviour the design relies on, then the server.
 
 ## What is here
 
 | Path | What |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | Architecture decision for v2 |
+| [`docs/architecture.md`](docs/architecture.md) | Architecture decision for v2, with the spike measurements |
 | [`docs/security.md`](docs/security.md) | Security model: threat model, access list, write filter, allowlist, scan, index-time transform, defaults |
 | [`docs/space-guidelines.md`](docs/space-guidelines.md) | Conventions a space follows when this server guards it |
 | [`docs/facts/`](docs/facts) | Measured behaviour of SilverBullet 2.12.1 that the security model rests on |
 | [`test/compose.yaml`](test/compose.yaml) | Test instance: SilverBullet 2.12, two spaces, two users, bootstrapped through the admin API |
-| [`spike/`](spike) | Throw-away scripts that tested the Runtime API (rendering, screenshots, isolation, memory); may be deleted later |
+| [`spike/`](spike) | Throw-away scripts that tested the Runtime API (rendering, screenshots, isolation, memory); the seed of the release checks |
 
 ## Test instance
 

@@ -4,18 +4,7 @@ Status: **proposed** (2026-10-30, revised 2026-11-03). This is the public record
 
 ## Goal
 
-One MCP server for a whole SilverBullet instance that, beyond reading and writing pages:
-
-1. serves **several users**, each with their own credential, and acts towards SilverBullet as *that* user, so that SilverBullet's permissions decide what is allowed and every write stays attributable to that user;
-2. reaches **every space** of the instance that the user may access (SilverBullet ≥ 2.10 multi-space mode, spaces addressed as `/<space>`);
-3. returns a page **rendered**, as Markdown with `${…}` expressions, queries, templates and transclusions evaluated, and as a **screenshot** (PNG), next to the raw source;
-4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
-5. runs behind a reverse proxy with **secrets from files**, and can later verify **OAuth tokens** instead of static bearers;
-6. **restricts each user further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
-7. **keeps code out of the pages its users write**, so that a page an agent wrote can be opened and rendered by anyone without running anything but audited code ([security.md](security.md));
-8. is **MIT**, with code taken only from MIT, Apache or BSD sources.
-
-It replaces a set-up of one single-user MCP server per user per space: there, every additional identity costs one more container, and pages come back only as raw source, so queries do not show their results.
+The goals are stated once, in the [README](../README.md#goals); this document says how the server meets them.
 
 ## Decision summary
 
