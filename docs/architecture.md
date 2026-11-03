@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposed** (2026-10-30, revised 2026-11-02). This is the public record of the architecture of v2 of this server; it is the only architecture document, there is no second copy elsewhere. The spike that backs it is in [`spike/`](../spike), the test instance in [`test/`](../test).
+Status: **proposed** (2026-10-30, revised 2026-11-03). This is the public record of the architecture of v2 of this server; it is the only architecture document, there is no second copy elsewhere. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The spike that backs this document is in [`spike/`](../spike), the test instance in [`test/`](../test).
 
 ## Goal
 
@@ -11,8 +11,9 @@ One MCP server for a whole SilverBullet instance that, beyond reading and writin
 3. returns a page **rendered**, as Markdown with `${…}` expressions, queries, templates and transclusions evaluated, and as a **screenshot** (PNG), next to the raw source;
 4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
 5. runs behind a reverse proxy with **secrets from files**, and can later verify **OAuth tokens** instead of static bearers;
-6. **restricts each user further than SilverBullet does**, by path, with a deny-by-default access list that never widens what SilverBullet grants and applies to every tool, listings and search included;
-7. is **MIT**, with code taken only from MIT, Apache or BSD sources.
+6. **restricts each user further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
+7. **keeps code out of the pages its users write**, so that a page an agent wrote can be opened and rendered by anyone without running anything but audited code ([security.md](security.md));
+8. is **MIT**, with code taken only from MIT, Apache or BSD sources.
 
 It replaces a set-up of one single-user MCP server per user per space: there, every additional identity costs one more container, and pages come back only as raw source, so queries do not show their results.
 
@@ -25,7 +26,8 @@ It replaces a set-up of one single-user MCP server per user per space: there, ev
 | Transport | Streamable HTTP, **stateless** (no MCP sessions held by the server) |
 | Auth, phase 1 | **Server-side credential map**: client bearer → user → that user's SilverBullet API token. No passthrough |
 | Auth, phase 2 | OAuth 2.1 **resource server**; an external OIDC provider (for example Keycloak) issues the tokens; the user claim selects the entry in the same map |
-| Access control | SilverBullet is the ceiling; below it an **access list** per user, space and path prefix (`r`, `w`, `d`, `x`), deny by default, applied to every tool |
+| Access control | SilverBullet is the ceiling; below it an **access list** per user or group, space and path (`r`, `w`, `d`, `x`, `-`), deny by default, the most specific path wins, applied to every tool |
+| Content | Pages hold no code: a **write filter** on every write, a **scan** of the space, an **index-time transform** in `CONFIG`, and an **allowlist** of the functions a page may call ([security.md](security.md)) |
 | Addressing | A **`space` parameter** on every tool (default: the user's default space); a `list-spaces` tool |
 | Space discovery | `GET /<space>/.config` with the user's token: it lists every space prefix and the user's `readOnly` flag; each space is probed with the user's token |
 | Raw read | `/.fs` API with `ETag` / `If-Match`; never touches the Runtime API |
@@ -118,10 +120,10 @@ TypeScript because SilverBullet itself, its plug API, both candidate servers and
 ```
 client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverBullet API token of that user> ──▶ SilverBullet
                                       │
-                                      └─ credentials file: sha256(client secret) → { user, sbToken, defaultSpace }
+                                      └─ credentials file: sha256(client secret) → { user, sbToken, defaultSpace, groups }
 ```
 
-* One entry per user (a user may have several client secrets, one per client, to revoke them separately). The file holds the **SHA-256 of each client secret**, never the secret itself, and the user's SilverBullet token. It is mounted read-only as a secret file; the server re-reads it on change. Adding a user is one entry here plus its lines in the access list (section 3).
+* One entry per user (a user may have several client secrets, one per client, to revoke them separately). The file holds the **SHA-256 of each client secret**, never the secret itself, the user's SilverBullet token, the user's default space and the **groups** the user belongs to. It is mounted read-only as a secret file; the server re-reads it on change. Adding a user is one entry here plus its lines in the access list (section 3), or none if a group entry already covers it.
 * The SilverBullet token never leaves the server. A leaked client secret works only against the MCP server's tools and is revoked by deleting its line; the SilverBullet token is revoked in the SilverBullet Dashboard.
 * **Everything is keyed by user**: the page listing cache per `(user, space)` (TTL 30 s, dropped on the server's own writes), rate limits per user, render queues per `(user, space)`. No content is cached across users.
 
@@ -140,7 +142,7 @@ client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverB
 
 ### 3. Access control: SilverBullet is the ceiling, an access list below it
 
-SilverBullet grants rights per space. The server passes SilverBullet's refusals (`401`, `403`, `404`, `412`) through as clear messages (for example "no write access to space alpha"; a refusal by the access list says so, too) and never widens them. Below that ceiling an **access list** beside the credentials file says, per user, space and path prefix, what the user may do through the MCP server:
+SilverBullet grants rights per space. The server passes SilverBullet's refusals (`401`, `403`, `404`, `412`) through as clear messages (for example "no write access to space alpha"; a refusal by the access list says so, too) and never widens them. Below that ceiling an **access list** beside the credentials file says, per user or group, space and path, what the user may do through the MCP server:
 
 | Right | Allows |
 |---|---|
@@ -148,8 +150,11 @@ SilverBullet grants rights per space. The server passes SilverBullet's refusals 
 | `w` | create and edit |
 | `d` | delete |
 | `x` | render and screenshot |
+| `-` | nothing: an explicit denial |
 
-* **Deny by default; the longest matching prefix wins.** A rule for `Projects/` and a narrower one for `Projects/Private/` combine as expected.
+* **Paths** are the whole space, an exact page, or a folder ending in `/`.
+* **Deny by default; the most specific path wins.** A rule for `Projects/` and a narrower one for `Projects/Private/` combine as expected. On the same path a user entry wins over group entries; between groups `-` wins, otherwise rights add up.
+* **Groups** are named on the user's line of the credentials file; a user may be in several. The shipped default is a group `agents` with `r` on the space, `-` on `CONFIG`, `SETTINGS` and `Library/`, and write rights only where the operator grants them ([security.md](security.md), section 4).
 * **Applied to every tool**, listings and search included: a page the user may not read is absent from `list-notes` and `search-notes` results, not only refused on `read-note`.
 * **Why the server may restrict at all:** a server-side restriction is only worth something if the client cannot go around it. Because the client never holds a SilverBullet token (section 2), the MCP server is its only route, and the list holds. SilverBullet stays the ceiling, so the list never hides what SilverBullet itself enforces.
 * The list restricts the **MCP route only**. Lua that runs inside SilverBullet (for example in a render, see section 5) runs with the user's full space rights.
@@ -163,9 +168,10 @@ Every tool takes `space` (the prefix, `alpha` for `/alpha`); omitted, the user's
 
 ### 5. Rendering: opt-in tools over the Runtime API
 
-* `render-note` (Markdown) and `screenshot-note` (PNG as MCP image content) are separate tools. They need **`x` in the access list** for the page, and only work where SilverBullet grants that user Write and the Runtime API; a user with read-only access to a space cannot render there. `read-note` stays on `/.fs` and never starts Chrome.
+* `render-note` (Markdown) and `screenshot-note` (PNG as MCP image content) are separate tools. They need **`x` in the access list** for the page, and only work where SilverBullet grants that user Write and the Runtime API; a user with read-only access to a space cannot render there. `read-note` stays on `/.fs` and never starts Chrome. Both render `.md` pages only.
+* **Rendering is for reading; editing works on the source.** `read-note` returns the raw Markdown as stored, with its `revision`; `render-note` returns the expansion and no `revision`, and `edit-note` requires one, so every edit is based on the source. After a write, a render waits (bounded) until the runtime's index holds the new revision, with a fresh runtime as fallback ([security.md](security.md), section 12).
 * One **queue per `(user, space)`**: renders and screenshots on the same runtime run one at a time (the `_CTX` shim and navigate-then-capture are not concurrent-safe).
-* The render script shadows `space.write*`/`delete*`. It is documented as best-effort (see the finding above): Lua in a page can still write through the runtime's browser with the user's full space rights, past the access list. Grant `x` narrowly. Rendering is for reading; a page that writes when rendered does the same when opened in the browser and is a defect of that page.
+* The render script shadows `space.write*`/`delete*`. It is documented as best-effort (see the finding above): Lua in a page can still write through the runtime's browser with the user's full space rights, past the access list. What makes `x` safe to grant is that pages hold no code: the write filter, the scan and the index-time transform ([security.md](security.md), sections 5, 7 and 10). A page that writes when rendered does the same when opened in the browser and is a defect of that page.
 * **Runtime lifetime**: SilverBullet keeps every runtime until restart, and only an administrator can see or stop runtimes. The server holds no admin token (section 2), so it cannot count or stop them; the number of runtimes is bounded instead by the `(user, space)` pairs the administrator allows: `x` somewhere in that space in the access list, and the Runtime API granted by SilverBullet. Each runtime costs about 200 MiB, so granting `x` is the administrator's call. Stopping idle runtimes is left to SilverBullet (see *Upstream*), to the administrator, or to a periodic restart of SilverBullet.
 * When SilverBullet offers `expandMarkdown{pageName}`, `fullPage` screenshots and `/.search`, the server uses them (feature-detected on the instance's version).
 * *Rendering in the MCP server itself* (its own Lua or Markdown engine) was rejected: queries, templates and widgets live in SilverBullet's client, and only the Runtime API runs them as the user.
@@ -183,13 +189,13 @@ One container (`node:24-alpine`, non-root, read-only root filesystem) on the sam
 | `read-note` | `GET /<s>/.fs/<path>` | returns `revision` (the ETag), offset/limit |
 | `read-multiple-notes` | as above | |
 | `search-notes` | `/.fs` + match in server | `/.search` when available |
-| `create-note` | `PUT` + `If-None-Match: *` | |
-| `edit-note` | `GET`, then `PUT` + `If-Match` | `expectedRevision`, `dryRun` returns the diff |
+| `create-note` | `PUT` + `If-None-Match: *` | write filter on the result |
+| `edit-note` | `GET`, then `PUT` + `If-Match` | `expectedRevision`, `dryRun` returns the diff; write filter on the result |
 | `delete-note` | `DELETE` + `If-Match` | needs `d` |
-| `render-note` | `POST /<s>/.runtime/lua_script` | needs `x` |
-| `screenshot-note` | `lua_script` + `GET /<s>/.runtime/screenshot` | needs `x`; `selector` |
+| `render-note` | `POST /<s>/.runtime/lua_script` | needs `x`; `.md` only; no `revision` |
+| `screenshot-note` | `lua_script` + `GET /<s>/.runtime/screenshot` | needs `x`; `.md` only; `selector` |
 
-Every tool checks the access list before calling SilverBullet: `r` for the read tools, `w` for `create-note` and `edit-note`.
+Every tool checks the access list before calling SilverBullet: `r` for the read tools, `w` for `create-note` and `edit-note`, which also run the write filter and the file-type check ([security.md](security.md), section 5). While the server is in its refuse-to-serve state ([security.md](security.md), section 9), only `list-spaces` and the health endpoint answer.
 
 `search-replace-note` from v1 is not carried over: it replaces case-insensitively everywhere without a revision check, and `edit-note` covers its use.
 
@@ -198,6 +204,8 @@ Every tool checks the access list before calling SilverBullet: `r` for the read 
 1. **Read-only runtime**: a Runtime API mode whose headless client holds only read access (or a runtime for read-only members). It would make "a render must not write" enforceable and allow rendering for read-only members.
 2. **Idle shutdown of runtimes** (for example `SB_RUNTIME_IDLE_TIMEOUT`), so that runtimes started for occasional renders do not stay resident until restart.
 3. **API tokens on `/.dashboard/api/spaces`**: optional; probing `/.config` works.
+4. **Tag transforms returning `{}`**: the documentation says the object is not indexed; in 2.12.1 the empty table reaches the indexer as an object without `ref` and the whole page drops out of the index ([facts/index-transform.md](facts/index-transform.md), section 4).
+5. **`.html` files served inline without a Content Security Policy** on the space's origin ([facts/execution-model.md](facts/execution-model.md), section 3).
 
 ## Open points for later tasks
 
