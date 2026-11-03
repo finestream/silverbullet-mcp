@@ -87,7 +87,7 @@ Run: `node run.ts`. *minimal* = `query`, `template.*` (the list the security mod
 
 41 cases; with the extended list every verdict matches the expectation. Nothing the parser could not decide: an unparsable body is a rejection by rule, and SilverBullet would show an error for it anyway.
 
-What the minimal list shows: pages of a typical space need `index.*` (every query reads `index.tag`/`index.pages()`), `views.*` (a page footer such as `views.page(...)`) and `string.*` (filters in `where`). `_CTX` is a reference, not a call, so it passes without an entry. This is why the shipped allowlist is the extended one ([security.md](../security.md), section 6).
+What the minimal list shows: pages of a typical space need `index.*` (every query reads `index.tag`/`index.pages()`), `views.*` (a page footer such as `views.page(...)`) and `string.*` (filters in `where`). `_CTX` is a reference, not a call, so it passes without an entry. This is why the shipped allowlist is the extended one plus `templates.*`, which the model needs once references are governed as well as calls (see *Open points* below; [security.md](../security.md), section 6).
 
 ## 5. Cost
 
