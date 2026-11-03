@@ -51,7 +51,7 @@ export function client(url: string) {
         body: script,
       });
       const raw = await r.text();
-      let body: { result?: unknown; error?: string } = {};
+      let body: { result?: unknown; error?: string };
       try {
         body = JSON.parse(raw);
       } catch {

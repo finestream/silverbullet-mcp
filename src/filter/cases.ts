@@ -1,5 +1,6 @@
-// Test matrix for the write filter spike. `expect` is what the security model
-// asks for; the run records what the filter actually says.
+// Test matrix of the write filter (docs/facts/write-filter.md, section 4, plus the
+// rules the security model added after the spike). `expect` is what the
+// security model asks for; the unit test and the release checks run it.
 
 export type Case = { id: string; name: string; expect: "accept" | "reject"; page: string };
 
@@ -59,4 +60,34 @@ export const cases: Case[] = [
   { id: "X1", name: "backtick inside a directive opens a code span that ends before a second directive", expect: "reject", page: '${"`"} text `${space.readPage("CONFIG")}` tail\n' },
   { id: "X2", name: "directive between two code spans", expect: "reject", page: '`a` ${space.readPage("CONFIG")} `b`\n' },
   { id: "X3", name: "backtick in a directive string, no second backtick", expect: "reject", page: '${space.readPage("`")}\n' },
+
+  // References are governed by the allowlist, not only calls (security.md, section 5)
+  { id: "R1", name: "bare global reference outside a query", expect: "reject", page: "${foo}\n" },
+  { id: "R2", name: "value reference in a table key", expect: "reject", page: "${template.each({x = space}, templates.pageItem)}\n" },
+  { id: "R3", name: "reference rooted in a parenthesis", expect: "reject", page: "${template.each({1}, (template).new)}\n" },
+  { id: "R4", name: "function reference passed as a value from a select clause", expect: "reject", page: '${query[[from index.tag "page" select template.each({"CONFIG"}, space.readPage)]]}\n' },
+  { id: "R5", name: "a namespace bound as a query source, then a method on it", expect: "reject", page: '${query[[from x = {template} select x.new("x")]]}\n' },
+
+  // Functions that evaluate their input or write (never allowed, security.md section 6)
+  { id: "E1", name: "template.new with a directive in its string", expect: "reject", page: "${template.each({1}, template.new(\"${space.readPage('CONFIG')}\"))}\n" },
+  { id: "E2", name: "index.indexObjects", expect: "reject", page: '${index.indexObjects("x", {})}\n' },
+  { id: "E3", name: "index.defineTag", expect: "reject", page: '${index.defineTag({name = "x"})}\n' },
+
+  // Query clauses: fields, bound variables, aggregates (security.md, section 5)
+  { id: "Q1", name: "bare field names in an unnamed query", expect: "accept", page: '${query[[from index.tag "page" where status == "active" select name]]}\n' },
+  { id: "Q2", name: "the implicit variable _", expect: "accept", page: '${query[[from index.tag "page" select _.tags[1]]]}\n' },
+  { id: "Q3", name: "group by with key, group and count()", expect: "accept", page: '${query[[from p = index.objects("tag") group by p.name select {key = key, n = #group, c = count()}]]}\n' },
+  { id: "Q4", name: "a nested query uses the outer variable", expect: "accept", page: '${query[[from p = index.tag "page" select query[[from q = index.tag "item" where q.page == p.name]]]]}\n' },
+  { id: "Q5", name: "a method on a query variable", expect: "reject", page: '${query[[from p = index.tag "page" where p.name:startsWith("A")]]}\n' },
+  { id: "Q6", name: "a dotted bare name in an unnamed query (write p.frontmatter.status)", expect: "reject", page: '${query[[from index.tag "page" where frontmatter.status == 1]]}\n' },
+  { id: "Q7", name: "order by using a named comparator", expect: "reject", page: '${query[[from p = index.tag "page" order by p.name using mycmp]]}\n' },
+  { id: "Q8", name: "an aggregate with a filter", expect: "accept", page: '${query[[from p = index.tag "page" group by p.status select {n = count() filter (where p.name == "x")}]]}\n' },
+
+  // The tag argument of a query or an index.* call (security.md, section 5)
+  { id: "G1", name: "tag argument is not a literal", expect: "reject", page: "${query[[from index.tag(x) select name]]}\n" },
+  { id: "G2", name: "tag argument is space-lua", expect: "reject", page: '${query[[from s = index.tag "space-lua" select s.ref]]}\n' },
+  { id: "G3", name: "index.objects with space-style", expect: "reject", page: '${index.objects("space-style")}\n' },
+  { id: "G4", name: "index.getObjectByRef with a literal tag", expect: "accept", page: '${index.getObjectByRef("A", "page", "A")}\n' },
+  { id: "G5", name: "index.getObjectByRef with a non-literal tag", expect: "reject", page: '${index.getObjectByRef("A", t, "A")}\n' },
+  { id: "G6", name: "index.pages() without a tag", expect: "accept", page: "${query[[from p = index.pages() limit 3]]}\n" },
 ];

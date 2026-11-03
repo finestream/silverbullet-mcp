@@ -2,4 +2,3 @@ node_modules/
 dist/
 test/.state/
 .env
-test/write-filter/out/
