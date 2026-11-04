@@ -99,7 +99,7 @@ Three files and a few variables. The files are re-read when they change; a `SIGH
 
 | File | Variable | What |
 |---|---|---|
-| credentials (a secret) | `MCP_CREDENTIALS_FILE`, default `/run/secrets/credentials` | One line per SilverBullet user: API token, default space, groups, bearer hashes; the line `scan` for the technical user ([example](config/credentials.example); [docs/security.md](docs/security.md), section 3) |
+| credentials (a secret) | `MCP_CREDENTIALS_FILE`, default `/run/secrets/credentials` | One line per SilverBullet user: API token, default space, groups, bearer hashes; the line of the technical user (`MCP_SCAN_USER`, default `scan`) ([example](config/credentials.example); [docs/security.md](docs/security.md), section 3) |
 | access list | `MCP_ACCESS_LIST_FILE`, default `$MCP_CONFIG_DIR/access-list` | What each user or group may do per space and path ([example](config/access-list.example); [docs/security.md](docs/security.md), section 4) |
 | allowlist | `MCP_ALLOWLIST_FILE`, default `$MCP_CONFIG_DIR/allowlist` | The functions a page may call ([shipped default](config/allowlist); [docs/security.md](docs/security.md), section 6) |
 | allowed files | `MCP_ALLOWED_FILES_FILE`, default `$MCP_CONFIG_DIR/allowed-files`, optional | Non-page files the scan may ignore ([example](config/allowed-files.example); [docs/security.md](docs/security.md), section 7) |
@@ -110,6 +110,7 @@ Three files and a few variables. The files are re-read when they change; a `SIGH
 | `PORT` | `4000` | The listening port |
 | `MCP_CONFIG_DIR` | `/etc/silverbullet-mcp` | Where the access list, the allowlist and the allowed-files list are, unless given one by one |
 | `MCP_SPACES` | all the scan user can see | The spaces to guard, comma-separated |
+| `MCP_SCAN_USER` | `scan` | The technical user of the scan ([docs/security.md](docs/security.md), section 7): the credentials-file line that holds its token |
 | `MCP_FILE_TYPES` | `.md` | The file types the server writes ([docs/security.md](docs/security.md), section 5) |
 | `MCP_SCAN_INTERVAL` | `15m` | Time between scans (`0`: at start and on `SIGHUP` only) |
 | `MCP_SCAN_MODE` | `report` | `report` or `quarantine` ([docs/security.md](docs/security.md), section 7) |

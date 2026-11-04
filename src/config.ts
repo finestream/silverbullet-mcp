@@ -1,6 +1,6 @@
 // Configuration from the environment (README, "Configuration"): where
 // SilverBullet is, the three configuration files, the file types, the scan
-// settings. Secrets are files (the credentials file); nothing secret is read
+// settings and the name of the scan's technical user. Secrets are files (the credentials file); nothing secret is read
 // from a variable.
 
 import { readFileSync, statSync, watchFile, unwatchFile } from "node:fs";
@@ -21,6 +21,8 @@ export type Config = {
   scanMode: ScanMode;
   /** The report page, written at the top level of every guarded space. */
   reportPage: string;
+  /** The technical user of the scan (docs/security.md, section 7): the credentials-file line that holds the scan's token. */
+  scanUser: string;
   /** The spaces the server guards; empty means every space the scan user can see. */
   spaces: string[];
   /** Tool calls per user and minute; 0 means no limit. */
@@ -35,6 +37,9 @@ export type Config = {
 };
 
 export const DEFAULT_FILE_TYPES = [".md"];
+
+/** The name of the scan's technical user unless `MCP_SCAN_USER` says otherwise. */
+export const DEFAULT_SCAN_USER = "scan";
 
 /** Types SilverBullet executes or serves as code; they can never be written through the server. */
 export const NEVER_WRITTEN_TYPES = [".plug.js", ".js", ".mjs", ".cjs", ".html", ".htm", ".xhtml", ".svg", ".lua"];
@@ -52,6 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     scanInterval: parseDuration(env.MCP_SCAN_INTERVAL ?? "15m"),
     scanMode: env.MCP_SCAN_MODE === "quarantine" ? "quarantine" : "report",
     reportPage: env.MCP_REPORT_PAGE ?? "MCP Server",
+    scanUser: env.MCP_SCAN_USER?.trim() || DEFAULT_SCAN_USER,
     spaces: (env.MCP_SPACES ?? "").split(",").map((s) => s.trim().replace(/^\//, "")).filter(Boolean),
     rateLimit: Number(env.MCP_RATE_LIMIT ?? 120),
     logLevel: env.MCP_LOG_LEVEL === "debug" ? "debug" : "info",

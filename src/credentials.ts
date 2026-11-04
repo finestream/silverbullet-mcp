@@ -1,7 +1,7 @@
 // The credentials file (docs/security.md, section 3; docs/architecture.md,
 // section 2): one line per SilverBullet user with that user's own API token,
 // its default space, its groups and the SHA-256 hashes of its static bearers.
-// The technical user of the scan is one more line.
+// The technical user of the scan (`MCP_SCAN_USER`, default `scan`) is one more line.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 
@@ -22,8 +22,6 @@ export type Credentials = {
   /** The user a client bearer belongs to, or null. Constant-time comparison per stored hash. */
   byBearer(bearer: string): Credential | null;
 };
-
-export const SCAN_USER = "scan";
 
 const HEX64 = /^[0-9a-f]{64}$/;
 

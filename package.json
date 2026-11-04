@@ -1,6 +1,6 @@
 {
   "name": "silverbullet-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "An MCP server for a SilverBullet instance in multi-space mode: per-user credentials, an access list, a write filter and a scan that keep code out of the pages agents write, and pages rendered through the Runtime API.",

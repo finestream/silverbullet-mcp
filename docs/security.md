@@ -38,7 +38,7 @@ The server ships these conventions as [space-guidelines.md](space-guidelines.md)
 
 ## 3. Identity, credentials, authentication
 
-* The server holds, per SilverBullet user, that user's own API token; the client never holds it (no passthrough, see [architecture.md](architecture.md), section 2). A credentials file, loaded from a secret and re-read when it changes, has one line per user: API token, default space, groups, and, for clients without OAuth, the SHA-256 hashes of their static bearers (one per client, revocable one by one; format in [`config/credentials.example`](../config/credentials.example)). One more line is the technical user `scan` of the scan (section 7).
+* The server holds, per SilverBullet user, that user's own API token; the client never holds it (no passthrough, see [architecture.md](architecture.md), section 2). A credentials file, loaded from a secret and re-read when it changes, has one line per user: API token, default space, groups, and, for clients without OAuth, the SHA-256 hashes of their static bearers (one per client, revocable one by one; format in [`config/credentials.example`](../config/credentials.example)). One more line is the technical user of the scan (section 7), named by `MCP_SCAN_USER` (default `scan`).
 * Clients authenticate with an OAuth token (verified; the user is looked up by `preferred_username`) or a static bearer (sent in the `Authorization` header only, looked up by its hash with a constant-time comparison). Both lead to the user's line. A user is limited to a number of tool calls per minute (shipped: 120); an address that keeps sending refused bearers is limited too; a request body is at most 4 MB. A regular expression an agent supplies to `search-notes` or as a `namePattern` is matched in a worker thread with a time limit, so a pattern that backtracks catastrophically is refused instead of blocking the server.
 * The server holds no admin token and passes SilverBullet's refusals through: SilverBullet is the ceiling, the server only restricts.
 
@@ -107,7 +107,7 @@ A write into `Library/` is possible only where the operator granted `w` there, a
 
 The server runs the filter of section 5 over every page outside `CONFIG` and `Library/`, and inventories every file that is not a page, at start (before it listens), on a schedule (`MCP_SCAN_INTERVAL`, shipped 15 minutes), on `SIGHUP`, and as a one-off run (`--scan`). The interval bounds how long an expression on a directly written page can run before it is found (blocks are already kept from loading by the transform, section 10); the shipped interval is shorter than a typical browser session.
 
-* It runs as a technical SilverBullet user (`scan`), a write member of the space whose token is in the credentials file. It is the server's own deterministic code, not an agent: it does not go through the access list; what it may touch is fixed in code (`CONFIG` and `Library/` never) and configuration. The spaces it scans are every space prefix the instance lists that `scan` can reach, or the list in `MCP_SPACES`; a space `scan` cannot reach as a write member is **unguarded**, and the server refuses to serve it (section 9).
+* It runs as a technical SilverBullet user (`scan` unless `MCP_SCAN_USER` names another), a write member of the space whose token is in the credentials file. It is the server's own deterministic code, not an agent: it does not go through the access list; what it may touch is fixed in code (`CONFIG` and `Library/` never) and configuration. The spaces it scans are every space prefix the instance lists that `scan` can reach, or the list in `MCP_SPACES`; a space `scan` cannot reach as a write member is **unguarded**, and the server refuses to serve it (section 9).
 * The scan also checks that `CONFIG` holds the transform block of section 10 verbatim, per space.
 * **Report-only** (shipped default): findings are written to the report page (section 8) and the log, and **rendering is refused in that whole space** while they exist: `render-note` and `screenshot-note` answer with the error that names the findings, `read` and `write` stay available, so an agent can help clean up. Its edits still pass the write filter, so a cleaned page is accepted and a page that still holds code is refused; a write through the server that passes the filter drops that page's findings at once, and the next scan refreshes the report page. Per space, not per page: a clean page can transclude or query a page with findings and run its code. No page but the report page is changed.
 * **Quarantine** (operator choice): a `space-lua`, `space-config` or `space-style` fence becomes a `lua` fence; an offending expression is wrapped in backticks (a fenced block when it spans a blank line); a baked marker loses its `#`; the page is tagged `#quarantined`. The neutralisations are inert in SilverBullet and keep the text visible; the scan checks the neutralised page with the filter before writing it, and leaves it a finding otherwise. A quarantine is reversed only by hand; the scan never undoes one.
@@ -116,7 +116,7 @@ The server runs the filter of section 5 over every page outside `CONFIG` and `Li
 
 ## 8. The report page
 
-A page in every guarded space, path configurable (`MCP_REPORT_PAGE`), default top-level `MCP Server`, written by `scan`, for the operator to read and act on:
+A page in every guarded space, path configurable (`MCP_REPORT_PAGE`), default top-level `MCP Server`, written by the technical user, for the operator to read and act on:
 
 * findings of the last scan: page, line, rule, reason; non-page files outside the allow entries; pages quarantined in that run;
 * server state: serving or refusing and why; rendering available or blocked; last scan time; allowlist and transform check results; settings weaker than the shipped defaults (section 11);
@@ -131,7 +131,7 @@ It is overwritten on each run, so it shows the current state. In quarantine mode
 The server stays up, `list-spaces` and the health endpoint (`/healthz`) answer, but every other tool call returns a predefined, informative error while any of these holds:
 
 * for the whole server: the allowlist file is missing or invalid (section 6), the access list file is missing or has a malformed line (a dropped line could have been a denial, so the list is applied whole or not at all), or the configured file types name a type that executes (section 5);
-* for one space: the index-time transform (section 10) is missing from its `CONFIG` or differs from the shipped block, or the space is unguarded because the technical user `scan` cannot reach it as a write member (section 7).
+* for one space: the index-time transform (section 10) is missing from its `CONFIG` or differs from the shipped block, or the space is unguarded because the technical user cannot reach it as a write member (section 7).
 
 Scan findings are not a refuse-to-serve condition: they block rendering in that space (section 7). The error says what is wrong and what the operator has to do, for example:
 

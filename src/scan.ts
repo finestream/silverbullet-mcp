@@ -1,5 +1,5 @@
 // The scan (docs/security.md, sections 7 and 8) and the transform check
-// (section 10), as the technical user `scan`: which spaces are guarded,
+// (section 10), as the technical user (`MCP_SCAN_USER`, default `scan`): which spaces are guarded,
 // whether CONFIG holds the shipped transform block, which pages outside
 // CONFIG and Library/ hold code, which files are not pages; the report page
 // per space; the quarantine when the operator chose it.
@@ -112,7 +112,7 @@ export class Scanner {
         summary.spaces.push(space);
         if (!token) {
           s.guarded = false;
-          s.unguardedReason = 'the credentials file has no line for the technical user "scan"';
+          s.unguardedReason = `the credentials file has no line for the technical user "${this.d.config.scanUser}"`;
           summary.unguarded.push(space);
           continue;
         }
@@ -144,12 +144,12 @@ export class Scanner {
       readOnly = (await sb.config(token, space)).readOnly;
     } catch (e) {
       s.guarded = false;
-      s.unguardedReason = e instanceof SbError && (e.status === 403 || e.status === 401) ? 'the user "scan" is not a member of the space' : `cannot read the space's configuration: ${(e as Error).message}`;
+      s.unguardedReason = e instanceof SbError && (e.status === 403 || e.status === 401) ? `the user "${this.d.config.scanUser}" is not a member of the space` : `cannot read the space's configuration: ${(e as Error).message}`;
       return;
     }
     if (readOnly) {
       s.guarded = false;
-      s.unguardedReason = 'the user "scan" is a read member; it must be a write member to write the report page';
+      s.unguardedReason = `the user "${this.d.config.scanUser}" is a read member; it must be a write member to write the report page`;
       return;
     }
     s.guarded = true;
