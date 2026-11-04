@@ -73,13 +73,15 @@ const rpcError = (res: ServerResponse, status: number, code: number, message: st
 export function createHttpServer(deps: HttpDeps): Server {
   const cache = new Cache();
   const limiter = new RateLimiter(deps.rateLimit);
+  const refused = new RateLimiter(30);
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/healthz") {
+      // Unauthenticated: says whether the server can serve, nothing about the spaces (the log and the report page do).
       const configured = deps.configured();
-      const spaces = Object.fromEntries([...deps.state.spaces.values()].map((s) => [s.space, { guarded: s.guarded, transform: s.transform, findings: s.findings.length, files: s.files.length, lastScan: s.lastScan }]));
-      return json(res, configured.ok ? 200 : 503, { ok: configured.ok, version: deps.version, problems: configured.problems, refusal: deps.state.globalRefusal(), scanning: deps.state.scanning, spaces });
+      const ok = configured.ok && deps.state.globalRefusal() === null;
+      return json(res, ok ? 200 : 503, { ok, version: deps.version, scanning: deps.state.scanning });
     }
     if (url.pathname !== "/mcp") return json(res, 404, { error: "not found" });
     if (req.method !== "POST") {
@@ -88,7 +90,10 @@ export function createHttpServer(deps: HttpDeps): Server {
     }
     const user = deps.auth.authenticate(req);
     if (!user) {
-      deps.log.info("auth.refused", { ip: req.socket.remoteAddress });
+      const ip = req.socket.remoteAddress ?? "?";
+      deps.log.info("auth.refused", { ip });
+      // Guessing bearers: a few refusals per minute and address, then 429.
+      if (!refused.allow(ip)) return rpcError(res, 429, -32002, "Too many refused requests from this address.", { "Retry-After": "60" });
       return rpcError(res, 401, -32001, "Unauthorized: send a valid bearer in the Authorization header.", { "WWW-Authenticate": 'Bearer realm="silverbullet-mcp"' });
     }
     if (!limiter.allow(user.user)) {

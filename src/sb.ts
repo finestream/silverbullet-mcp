@@ -66,7 +66,7 @@ export class SilverBullet {
     try {
       r = await fetch(url, { ...init, headers: this.headers(token, init.headers) });
     } catch (e) {
-      throw new SbError(0, space, path, `cannot reach SilverBullet at ${this.url}: ${(e as Error).message}`);
+      throw new SbError(0, space, path, "cannot reach SilverBullet");
     }
     if (!r.ok) throw new SbError(r.status, space, path, await r.text());
     return r;

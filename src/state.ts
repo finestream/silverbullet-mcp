@@ -81,6 +81,10 @@ export class State {
     if (!this.fileTypes.ok) {
       return `Refusing to serve: the configured file types are invalid (${this.fileTypes.problems.join("; ")}). Operator: fix MCP_FILE_TYPES (docs/security.md, section 5) and restart the server.`;
     }
+    if (!this.accessList.ok) {
+      // A malformed line could be a denial; the list is applied whole or not at all.
+      return `Refusing to serve: the access list file is missing or invalid (${this.accessList.problems.join("; ")}). Operator: fix the access list (docs/security.md, section 4) and restart the server or send it SIGHUP.`;
+    }
     return null;
   }
 
@@ -114,12 +118,13 @@ export class State {
     return `Rendering is blocked in space "${space}": the last scan found ${parts.join(" and ")}. Operator: read the report page "${this.reportPage}" in that space, then fix or allow; agents may still read and write, and a cleaned page is accepted.`;
   }
 
-  /** After a successful write through the server: the page is clean now, so its findings go. */
-  dropFindings(space: string, page: string) {
+  /** After a successful write or delete through the server: the page is clean or gone, so its findings go. */
+  dropFindings(space: string, page: string, deletedFile?: string) {
     const s = this.spaces.get(space);
     if (!s) return;
-    const before = s.findings.length;
+    const before = s.findings.length + s.files.length;
     s.findings = s.findings.filter((f) => f.page !== page);
-    if (s.findings.length !== before) s.findingsChangedSinceScan = true;
+    if (deletedFile) s.files = s.files.filter((f) => f.file !== deletedFile);
+    if (s.findings.length + s.files.length !== before) s.findingsChangedSinceScan = true;
   }
 }

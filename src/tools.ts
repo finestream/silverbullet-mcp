@@ -79,8 +79,29 @@ const TEXT_TYPES = /^(text\/|application\/(json|yaml|x-yaml|xml|javascript|toml)
 /** `Agent/Plan` means `Agent/Plan.md`; a name whose last segment has an extension is taken as is. */
 export function normalizeName(filename: string): string {
   const name = filename.replace(/^\/+/, "");
+  if (name.length === 0 || name.length > 1000) throw new Refusal("input", "The file name is empty or longer than 1000 characters.");
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f\\]/.test(name)) throw new Refusal("input", "The file name holds a control character or a backslash.");
+  for (const segment of name.split("/")) {
+    if (segment === "" || segment === "." || segment === ".." || segment.startsWith(".")) {
+      throw new Refusal("input", `The file name "${filename}" has an empty, "." or dot-prefixed segment; SilverBullet refuses those and so does this server.`);
+    }
+  }
   const last = name.slice(name.lastIndexOf("/") + 1);
   return last.includes(".") ? name : `${name}.md`;
+}
+
+const SPACE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const REGEX_LIMIT = 300;
+
+/** A user-supplied regex: bounded in length, compiled or refused. */
+function compileRegex(pattern: string, flags: string, what: string): RegExp {
+  if (pattern.length > REGEX_LIMIT) throw new Refusal("input", `${what} is longer than ${REGEX_LIMIT} characters.`);
+  try {
+    return new RegExp(pattern, flags);
+  } catch (e) {
+    throw new Refusal("input", `${what} is not a valid regex: ${(e as Error).message}`);
+  }
 }
 
 export function registerTools(server: McpServer, ctx: Context) {
@@ -90,7 +111,15 @@ export function registerTools(server: McpServer, ctx: Context) {
   const resolveSpace = (space: string | undefined): string => {
     const s = space ?? user.defaultSpace;
     if (!s) throw new Refusal("input", `No space given and user "${user.user}" has no default space; pass the "space" parameter.`);
+    if (!SPACE_NAME.test(s)) throw new Refusal("input", `"${s}" is not a space name (letters, digits, "_" and "-").`);
     return s;
+  };
+
+  /** The report page is the scan's; nothing writes or deletes it through the tools. */
+  const notReportPage = (file: string) => {
+    if (pageNameOf(file) === config.reportPage) {
+      throw new Refusal("input", `"${config.reportPage}" is the server's report page, written by the scan; it cannot be changed through the tools.`);
+    }
   };
 
   const serving = (space: string) => {
@@ -131,7 +160,7 @@ export function registerTools(server: McpServer, ctx: Context) {
 
   /** The write filter on the page that would result (docs/security.md, section 5). */
   const checkContent = (file: string, content: string) => {
-    if (!file.endsWith(".md") || isCodePlace(pageNameOf(file))) return;
+    if (!file.toLowerCase().endsWith(".md") || isCodePlace(pageNameOf(file))) return;
     const verdict = checkPage(content, allow);
     if (!verdict.ok) {
       const reasons = verdict.violations.map(describe).join("; ");
@@ -231,7 +260,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       serving(s);
       let files = await visible(s);
       if (namePattern) {
-        const re = new RegExp(namePattern, "i");
+        const re = compileRegex(namePattern, "i", "namePattern");
         files = files.filter((f) => re.test(f.name));
       }
       files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -303,7 +332,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       if (!filenames && !namePattern) throw new Refusal("input", "Give filenames or a namePattern.");
       const names = new Set<string>((filenames ?? []).map(normalizeName));
       if (namePattern) {
-        const re = new RegExp(namePattern, "i");
+        const re = compileRegex(namePattern, "i", "namePattern");
         for (const f of await visible(s)) if (re.test(f.name)) names.add(f.name);
       }
       const notes: Array<Record<string, unknown>> = [];
@@ -342,12 +371,7 @@ export function registerTools(server: McpServer, ctx: Context) {
     tool("search-notes", async ({ space: sp, query, useRegex, caseSensitive, searchType, maxResults, page, contextLines, maxMatchesPerNote }) => {
       const s = resolveSpace(sp);
       serving(s);
-      let re: RegExp;
-      try {
-        re = new RegExp(useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "g" : "gi");
-      } catch (e) {
-        throw new Refusal("input", `Invalid regex: ${(e as Error).message}`);
-      }
+      const re = compileRegex(useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "g" : "gi", "query");
       const pages = (await visible(s)).filter((f) => f.name.endsWith(".md"));
       type Match = { type: "title" | "content"; line: number; content: string; matchCount: number; context?: string };
       const hits: Array<{ filename: string; matches: Match[]; score: number }> = [];
@@ -411,6 +435,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       const s = resolveSpace(sp);
       serving(s);
       const file = normalizeName(filename);
+      notReportPage(file);
       need(s, file, "w");
       checkFileType(file);
       const body = encoding === "base64" ? Buffer.from(content, "base64") : content;
@@ -455,6 +480,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       const s = resolveSpace(sp);
       serving(s);
       const file = normalizeName(filename);
+      notReportPage(file);
       need(s, file, "r", "w");
       checkFileType(file);
       const original = await readText(s, file);
@@ -502,13 +528,14 @@ export function registerTools(server: McpServer, ctx: Context) {
       const s = resolveSpace(sp);
       serving(s);
       const file = normalizeName(filename);
+      notReportPage(file);
       need(s, file, "d");
       await sb.delete(token, s, file, expectedRevision ? { ifMatch: expectedRevision } : {}).catch((e) => {
         if (e instanceof SbError && e.status === 412) throw new Refusal("revision", `Revision conflict: ${file} is not at ${expectedRevision}. Read it again. Nothing was deleted.`);
         throw e;
       });
       cache.invalidate(user.user, s);
-      state.dropFindings(s, pageNameOf(file));
+      state.dropFindings(s, pageNameOf(file), file);
       return result({ space: s, filename: file, deleted: true }, `Deleted ${s}/${file}`);
     }),
   );

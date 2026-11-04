@@ -41,6 +41,8 @@ const REFUSED: Array<[string, string, RegExp]> = [
   ["a tag that is not a literal", "${query[[from index.tag(x) select name]]}\n", /tag-not-literal/],
   ["the space-lua tag", '${query[[from s = index.tag "space-lua" select s.ref]]}\n', /script-tag: index.tag "space-lua"/],
   ["a directive that does not parse", "${x = 1}\n", /parse-error/],
+  ["a baked section with code (re-evaluated by a person's command)", '<!--#lua space.readPage("CONFIG") -->\n| a |\n<!--/lua-->\n', /line 1, denied-name: space.readPage/],
+  ["a query without a named row", '${query[[from index.tag "page" where status == "x" select name]]}\n', /unnamed-query/],
 ];
 
 test("write filter: each rule refuses the write, naming the rule and the line; nothing is written", async () => {
@@ -65,7 +67,7 @@ test("write filter: a clean page with queries, templates and the DR footer is ac
     "",
     "Sum: ${1 + 2}",
     "${template.each(query[[from p = index.tag \"page\" where string.startsWith(p.name, \"Projects/\") order by p.name limit 3]], templates.pageItem)}",
-    "${query[[from index.tag \"page\" where status == \"active\" select name]]}",
+    "${query[[from q = index.tag \"page\" where q.status == \"active\" select q.name]]}",
     "",
     "A `${space.readPage(\"CONFIG\")}` in a code span is text.",
     "",
@@ -102,6 +104,14 @@ test("write filter: Library/ is not filtered, and is writable only with w (bob o
   await sb.remove(T.admin, "beta", `${name}.md`);
   const relaxed = server.logs.filter((l) => l.includes("config.relaxed") && l.includes("Library/"));
   assert.ok(relaxed.length > 0, "w on Library/ is reported at start as a relaxed setting");
+});
+
+test("the report page cannot be written or deleted through the tools", async () => {
+  const r = await alice.call("create-note", { filename: "MCP Server", content: "fake report", overwrite: true });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /is the server's report page/);
+  const d = await alice.call("delete-note", { filename: "MCP Server" });
+  assert.match(d.text, /is the server's report page/);
 });
 
 test("file types: .md and the configured .csv are written; .png is refused; .html and .plug.js are never written", async () => {

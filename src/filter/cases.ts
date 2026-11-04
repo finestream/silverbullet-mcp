@@ -12,7 +12,7 @@ export const cases: Case[] = [
   { id: "T2", name: "_G with concatenated name", expect: "reject", page: 'Secret: ${_G["sp".."ace"].readPage("CONFIG")}\n' },
   { id: "T3", name: "load(...)()", expect: "reject", page: '${load("return space.readPage(\\"CONFIG\\")")()}\n' },
   { id: "T4", name: "query with space.readPage in where", expect: "reject", page: '${query[[from index.tag "page" where space.readPage(name)]]}\n' },
-  { id: "T5", name: "harmless template.each over a query", expect: "accept", page: '${template.each(query[[from index.tag "page" limit 3]], templates.pageItem)}\n' },
+  { id: "T5", name: "harmless template.each over a query", expect: "accept", page: '${template.each(query[[from p = index.tag "page" limit 3]], templates.pageItem)}\n' },
   { id: "T6", name: "page with a space-lua fence", expect: "reject", page: "Text.\n\n" + fence("space-lua", 'function f() return space.readPage("CONFIG") end') },
   { id: "T7", name: "page with a lua fence", expect: "accept", page: "Example:\n\n" + fence("lua", 'function f() return space.readPage("CONFIG") end') },
   { id: "T8a", name: "${ inside a code span", expect: "accept", page: 'Write `${space.readPage("CONFIG")}` to read a page.\n' },
@@ -74,12 +74,13 @@ export const cases: Case[] = [
   { id: "E3", name: "index.defineTag", expect: "reject", page: '${index.defineTag({name = "x"})}\n' },
 
   // Query clauses: fields, bound variables, aggregates (security.md, section 5)
-  { id: "Q1", name: "bare field names in an unnamed query", expect: "accept", page: '${query[[from index.tag "page" where status == "active" select name]]}\n' },
-  { id: "Q2", name: "the implicit variable _", expect: "accept", page: '${query[[from index.tag "page" select _.tags[1]]]}\n' },
+  { id: "Q1", name: "a query without a named row (fields would shadow globals)", expect: "reject", page: '${query[[from index.tag "page" where status == "active" select name]]}\n' },
+  { id: "Q2", name: "the implicit variable _ of an unnamed query", expect: "reject", page: '${query[[from index.tag "page" select _.tags[1]]]}\n' },
+  { id: "Q2b", name: "the same query with a named row", expect: "accept", page: '${query[[from p = index.tag "page" where p.status == "active" select p.name]]}\n' },
   { id: "Q3", name: "group by with key, group and count()", expect: "accept", page: '${query[[from p = index.objects("tag") group by p.name select {key = key, n = #group, c = count()}]]}\n' },
   { id: "Q4", name: "a nested query uses the outer variable", expect: "accept", page: '${query[[from p = index.tag "page" select query[[from q = index.tag "item" where q.page == p.name]]]]}\n' },
   { id: "Q5", name: "a method on a query variable", expect: "reject", page: '${query[[from p = index.tag "page" where p.name:startsWith("A")]]}\n' },
-  { id: "Q6", name: "a dotted bare name in an unnamed query (write p.frontmatter.status)", expect: "reject", page: '${query[[from index.tag "page" where frontmatter.status == 1]]}\n' },
+  { id: "Q6", name: "a bare global passed as a callback inside a clause", expect: "reject", page: '${query[[from p = index.tag "page" select template.each({"CONFIG"}, readAll)]]}\n' },
   { id: "Q7", name: "order by using a named comparator", expect: "reject", page: '${query[[from p = index.tag "page" order by p.name using mycmp]]}\n' },
   { id: "Q8", name: "an aggregate with a filter", expect: "accept", page: '${query[[from p = index.tag "page" group by p.status select {n = count() filter (where p.name == "x")}]]}\n' },
 
@@ -90,4 +91,10 @@ export const cases: Case[] = [
   { id: "G4", name: "index.getObjectByRef with a literal tag", expect: "accept", page: '${index.getObjectByRef("A", "page", "A")}\n' },
   { id: "G5", name: "index.getObjectByRef with a non-literal tag", expect: "reject", page: '${index.getObjectByRef("A", t, "A")}\n' },
   { id: "G6", name: "index.pages() without a tag", expect: "accept", page: "${query[[from p = index.pages() limit 3]]}\n" },
+  { id: "G7", name: "index.queryLuaObjects takes a query as data (a Lua syntax tree as a table)", expect: "reject", page: '${index.queryLuaObjects("page", {where = {type = "Variable", name = "space"}})}\n' },
+
+  // Baked sections: the expression of `<!--#lua EXPR -->` is re-evaluated by a person's command
+  { id: "B1", name: "a baked section with code", expect: "reject", page: '<!--#lua space.readPage("CONFIG") -->\n| a |\n<!--/lua-->\n' },
+  { id: "B2", name: "a baked section with an allowed query", expect: "accept", page: '<!--#lua query[[from p = index.tag "page" select p.name]] -->\n| name |\n<!--/lua-->\n' },
+  { id: "B3", name: "a baked marker inside a code block is text", expect: "accept", page: "```\n<!--#lua space.readPage(\"CONFIG\") -->\n```\n" },
 ];

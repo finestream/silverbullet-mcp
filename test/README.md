@@ -38,7 +38,7 @@ Any Docker with Compose works; give the daemon or VM about 4 GB, since the conta
 | `checks/02-runtime.test.ts` | `markdown.expandMarkdown` evaluates everything; the `_CTX` gap; the write guard and its `fetch` bypass; the runtime is the token's user and needs Write; screenshots, `?selector=`, `?fullPage=` |
 | `checks/03-execution.test.ts` | Which fences execute; inert fences and code spans; query clauses as full Lua; `.lua` only through `dofile`; `.html` served inline without CSP; the event stream; how fast the headless runtime sees and indexes a write |
 | `checks/04-index.test.ts` | What the index holds of `CONFIG` and `Library/`; the shipped transform block (verbatim as in the security model) and its effect on `space-lua` and `space-style`; survival across reload, reboot, reindex and a fresh runtime; the `return {}` defect; the hazard of an index built without the transform; scripts not reloaded after an incremental index; `CONFIG`'s objects cannot be dropped |
-| `checks/05-parser.test.ts` | The write-filter matrix (63 cases, `src/filter/cases.ts`) with the shipped allowlist; the four vendored parser files of `src/filter/vendor/` unchanged at the release's tag; the pinned `@lezer/*` versions (both need the network) |
+| `checks/05-parser.test.ts` | The write-filter matrix (68 cases, `src/filter/cases.ts`) with the shipped allowlist; the four vendored parser files of `src/filter/vendor/` unchanged at the release's tag; the pinned `@lezer/*` versions (both need the network) |
 | `checks/06-cost.test.ts` | The filter's time per 50 KB page |
 | `checks/07-browser.test.ts` | A fresh browser client (service worker, IndexedDB) boots with the transform active; an API write is indexed with its script replaced and a reload loads nothing |
 

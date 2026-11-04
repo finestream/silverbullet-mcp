@@ -48,9 +48,11 @@ const TAG_ARGUMENT: Record<string, number> = {
   "index.objects": 0,
   "index.contentPages": 0,
   "index.pages": 0,
-  "index.queryLuaObjects": 0,
   "index.getObjectByRef": 1,
 };
+
+/** The opening marker of a baked section (client/baked_sections/regions.ts): its expression is re-evaluated by a person's command. */
+const BAKED_OPEN = /<!--#lua\s+([\s\S]*?)-->/g;
 const SCRIPT_TAGS = new Set(["space-lua", "space-style"]);
 
 /** Pages the filter does not apply to: where code belongs (docs/security.md, section 2). */
@@ -117,6 +119,15 @@ export function checkPage(source: string, allow: Allowlist): Verdict {
     pos += len;
   }
 
+  // Baked sections: `<!--#lua EXPR -->` holds an expression that "Baked Sections: Update" re-evaluates
+  // on the whole page, with the rights of the person who runs it. Checked like a directive.
+  for (const m of source.matchAll(BAKED_OPEN)) {
+    if (inCode(m.index!)) continue;
+    directives++;
+    const found = checkExpression(m[1], allow);
+    for (const v of found) violations.push({ ...v, line: lineOf(m.index!), from: m.index!, to: m.index! + m[0].length });
+  }
+
   return { ok: violations.length === 0, violations, directives };
 }
 
@@ -124,9 +135,9 @@ type Reason = { rule: string; detail: string };
 
 /** What a directive body may reference without an allowlist entry, at one point of the walk. */
 type Scope = {
-  /** Names bound by `from x = …` (`_` for an unnamed source), and `key` and `group` under `group by`. */
+  /** Names bound by `from x = …`, and `key` and `group` under `group by`. */
   bound: Set<string>;
-  /** Inside a `where`, `select`, `order by`, `group by`, `having`, `limit` or `offset` clause: a bare name standing alone is a field of the row. */
+  /** Inside a query clause other than `from`, where the aggregates are the query engine's own. */
   inClause: boolean;
 };
 
@@ -149,8 +160,7 @@ export function checkExpression(body: string, allow: Allowlist): Reason[] {
 
   /**
    * A static reference path, called or not. Returns true when it is allowed. `_CTX` and the bound
-   * names are not global names; inside a query clause a bare name standing alone is a field of the
-   * row, unless it is a never-allowed name.
+   * names are not global names; everything else is, and must be on the allowlist.
    */
   const checkReference = (path: string[], scope: Scope, isCall: boolean): boolean => {
     const root = path[0];
@@ -160,7 +170,6 @@ export function checkExpression(body: string, allow: Allowlist): Reason[] {
       push("denied-name", joined);
       return false;
     }
-    if (scope.inClause && path.length === 1 && !isCall) return true;
     if (allow.allows(path)) return true;
     push(isCall ? "call-not-allowed" : "reference-not-allowed", joined);
     return false;
@@ -233,7 +242,12 @@ export function checkExpression(body: string, allow: Allowlist): Reason[] {
           if (!clause.name.endsWith("Clause")) continue;
           clauses.push(clause);
           if (clause.name === "FromClause") {
-            for (const f of fieldsOf(clause)) bound.add(f.name === "FieldProp" ? text(f.firstChild!) : "_");
+            // A source without a name makes every field of the row a bare variable that shadows
+            // globals; the filter could not tell a field from a global, so the row must be named.
+            for (const f of fieldsOf(clause)) {
+              if (f.name === "FieldProp") bound.add(text(f.firstChild!));
+              else push("unnamed-query", `from ${short(f).slice(0, 30)}: bind the row, as in "from p = …"`);
+            }
           }
           if (clause.name === "GroupByClause") {
             bound.add("key");

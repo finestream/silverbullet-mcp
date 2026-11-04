@@ -42,10 +42,9 @@ test("auth: GET and DELETE on /mcp are 405 (stateless); /healthz answers without
   assert.equal((await fetch(`${server.url}/mcp`, { method: "DELETE" })).status, 405);
   const h = await fetch(`${server.url}/healthz`);
   assert.equal(h.status, 200);
-  const body = (await h.json()) as { ok: boolean; spaces: Record<string, { guarded: boolean; transform: string }> };
+  const body = (await h.json()) as Record<string, unknown>;
   assert.equal(body.ok, true);
-  assert.equal(body.spaces.alpha.guarded, true);
-  assert.equal(body.spaces.alpha.transform, "present");
+  assert.deepEqual(Object.keys(body).sort(), ["ok", "scanning", "version"], "nothing about the spaces without a bearer");
 });
 
 test("tools: the v1-compatible tool names, no search-replace-note", async () => {
@@ -133,6 +132,16 @@ test("access: two users see different listings of the same space; carol sees not
   const c = await carol.call("list-notes");
   assert.equal(c.isError, true);
   assert.match(c.text, /SilverBullet refused/);
+});
+
+test("input: names with dot segments, control characters or backslashes, and malformed space names are refused before any call", async () => {
+  for (const filename of ["../CONFIG", "Agent/../../CONFIG", ".hidden", "Agent/.git/x", "a\\b", "Agent//x", "x\u0000y"]) {
+    const r = await alice.call("read-note", { filename });
+    assert.equal(r.isError, true, filename);
+    assert.match(r.text, /^The file name/, filename);
+  }
+  const sp = await alice.call("read-note", { space: "../.dashboard", filename: "x" });
+  assert.match(sp.text, /is not a space name/);
 });
 
 test("access: delete needs d; alice has it under Agent/ only", async () => {

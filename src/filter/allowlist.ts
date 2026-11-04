@@ -27,7 +27,6 @@ export const SHIPPED_ALLOWLIST: readonly string[] = [
   "index.objects",
   "index.pages",
   "index.paragraphs",
-  "index.queryLuaObjects",
   "index.relations",
   "index.resolveAnchor",
   "index.subPages",
@@ -57,9 +56,11 @@ export const NEVER_ALLOWED: readonly string[] = [
   "tag", "command", "schema",
   // functions that evaluate their input
   "template.new", "markdown",
-  // index functions that write the index or a page, or register a tag
+  // index functions that write the index or a page, register a tag, or evaluate a query given as data
   "index.indexObjects", "index.deleteObject", "index.defineTag", "index.patchFrontmatter",
-  "index.reindexSpace", "index.ensureFullIndex",
+  "index.reindexSpace", "index.ensureFullIndex", "index.clearFileIndex",
+  // takes a query as a table whose clauses are Lua syntax trees: code as data
+  "index.queryLuaObjects",
 ];
 
 export type Allowlist = {

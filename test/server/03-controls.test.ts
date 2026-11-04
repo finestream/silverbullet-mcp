@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { startServer, connect, BEARERS, DEFAULT_ACCESS_LIST, credentialsFile, unique } from "./harness.ts";
 import { sb, T, SB_URL } from "../lib/env.ts";
 import { configPage } from "../lib/transform.ts";
-import { SHIPPED_ALLOWLIST } from "../../src/filter/allowlist.ts";
+import { SHIPPED_ALLOWLIST, compileAllowlist } from "../../src/filter/allowlist.ts";
+import { checkPage } from "../../src/filter/filter.ts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const BETA_ACCESS = DEFAULT_ACCESS_LIST + "bob beta / rw\n";
@@ -34,8 +35,7 @@ test("refuse to serve: an allowlist entry that covers a never-allowed name refus
     const spaces = await alice.call("list-spaces");
     assert.equal(spaces.isError, false, "list-spaces still answers");
     assert.match((spaces.data!.spaces as Array<{ refusal: string }>)[0].refusal, /Refusing to serve/);
-    const health = (await (await fetch(`${server.url}/healthz`)).json()) as { refusal: string | null };
-    assert.match(health.refusal ?? "", /allowlist/);
+    assert.equal((await fetch(`${server.url}/healthz`)).status, 503, "not healthy while refusing to serve");
   } finally {
     await alice.close();
     await server.stop();
@@ -57,6 +57,39 @@ test("refuse to serve: a space whose CONFIG lacks the transform is refused; the 
     const again = await bob.call("read-note", { filename: "Secret" });
     assert.equal(again.isError, false, again.text);
   } finally {
+    await bob.close();
+    await server.stop();
+  }
+});
+
+test("refuse to serve: a malformed access list refuses every tool (a dropped line could be a denial)", async () => {
+  const server = await startServer({ accessList: DEFAULT_ACCESS_LIST + "@agents * Library/\n" });
+  const alice = await connect(server.url, BEARERS.alice);
+  try {
+    const r = await alice.call("read-note", { filename: "Rendered" });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /^Refusing to serve: the access list file is missing or invalid \(line \d+: expected/);
+    assert.equal((await fetch(`${server.url}/healthz`)).status, 503);
+  } finally {
+    await alice.close();
+    await server.stop();
+  }
+});
+
+test("report page: a page name or a detail with a directive cannot make the report page live", async () => {
+  const evil = 'Evil ${space.readPage("CONFIG")}';
+  await sb.write(T.admin, "beta", `${evil}.md`, "Body with `${1}` and ${space.readPage(\"CONFIG\")}\n");
+  const server = await startServer({ accessList: BETA_ACCESS });
+  const bob = await connect(server.url, BEARERS.bob);
+  try {
+    const report = await bob.call("read-note", { filename: "MCP Server", limit: 100_000 });
+    assert.equal(report.isError, false, report.text);
+    const verdict = checkPage(report.data!.content, compileAllowlist([]));
+    assert.equal(verdict.directives, 0, "no live directive in the report");
+    assert.ok(verdict.ok);
+    assert.match(report.data!.content, /Evil/);
+  } finally {
+    await sb.remove(T.admin, "beta", `${evil}.md`);
     await bob.close();
     await server.stop();
   }

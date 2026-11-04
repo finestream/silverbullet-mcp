@@ -11,7 +11,7 @@ test("filter: every case of the matrix gets the verdict the security model asks 
     .filter((c) => c.verdict !== c.expect)
     .map((c) => `${c.id} ${c.name}: expected ${c.expect}, got ${c.verdict}`);
   assert.deepEqual(wrong, []);
-  assert.equal(cases.length, 63);
+  assert.equal(cases.length, 68);
 });
 
 test("filter: a violation names the rule, the line and the range of the directive", () => {

@@ -5,7 +5,7 @@
 // per space; the quarantine when the operator chose it.
 
 import { checkPage, isCodePlace, type Violation } from "./filter/filter.ts";
-import type { Allowlist } from "./filter/allowlist.ts";
+import { compileAllowlist, type Allowlist } from "./filter/allowlist.ts";
 import { pageNameOf, pathMatches } from "./access.ts";
 import { SbError, type SilverBullet, type SbFile } from "./sb.ts";
 import type { Config } from "./config.ts";
@@ -189,13 +189,18 @@ export class Scanner {
       if (verdict.ok) continue;
       if (config.scanMode === "quarantine") {
         const neutralised = quarantine(source, verdict.violations);
-        try {
-          await sb.write(token, space, f.name, neutralised, { ifMatch: read.etag ?? undefined });
-          quarantined.push(page);
-          log.warn("scan.quarantined", { space, page, violations: verdict.violations.length });
-          continue;
-        } catch (e) {
-          log.error("scan.quarantine.failed", { space, page, error: (e as Error).message });
+        // The neutralised page must pass the filter itself; otherwise it stays a finding.
+        if (checkPage(neutralised, allow).ok) {
+          try {
+            await sb.write(token, space, f.name, neutralised, { ifMatch: read.etag ?? undefined });
+            quarantined.push(page);
+            log.warn("scan.quarantined", { space, page, violations: verdict.violations.length });
+            continue;
+          } catch (e) {
+            log.error("scan.quarantine.failed", { space, page, error: (e as Error).message });
+          }
+        } else {
+          log.error("scan.quarantine.failed", { space, page, error: "the neutralised page still holds code" });
         }
       }
       for (const v of verdict.violations) findings.push({ page, line: v.line, rule: v.rule, detail: v.detail });
@@ -214,7 +219,7 @@ export class Scanner {
 
   private async writeReport(space: string, token: string, s: SpaceState, files: SbFile[]) {
     const { sb, config, state, log } = this.d;
-    const text = renderReport(space, s, state, config, files.length);
+    const text = safeReport(renderReport(space, s, state, config, files.length));
     const file = `${config.reportPage}.md`;
     try {
       await sb.write(token, space, file, text);
@@ -224,9 +229,14 @@ export class Scanner {
   }
 }
 
+/** A fence longer than any run of backticks in the text, so that the text cannot close it. */
+const fenceFor = (text: string) => "`".repeat(Math.max(3, (text.match(/`+/g) ?? []).reduce((m, t) => Math.max(m, t.length), 0) + 1));
+
 /**
  * Neutralises the violations in place, keeping the text visible: an executable fence becomes a
- * `lua` fence, a directive is wrapped in a code span, and the page is tagged #quarantined.
+ * `lua` fence, a directive is wrapped in a code span (or a fenced block when it spans a blank
+ * line, which would end a code span), a baked marker loses its `#`, and the page is tagged
+ * #quarantined.
  */
 export function quarantine(source: string, violations: Violation[]): string {
   const ranges = [...violations].sort((a, b) => b.from - a.from);
@@ -239,8 +249,13 @@ export function quarantine(source: string, violations: Violation[]): string {
     let replacement: string;
     if (v.rule === "fence" || v.rule === "fence-hidden") {
       replacement = piece.replace(/^([ \t]{0,3}(?:`{3,}|~{3,})[ \t]*)(space-lua|space-config|space-style)\b[^\n]*/, "$1lua");
+    } else if (piece.startsWith("<!--#lua")) {
+      replacement = "<!-- #lua" + piece.slice("<!--#lua".length);
+    } else if (/\n[ \t]*\n/.test(piece)) {
+      const fence = fenceFor(piece);
+      replacement = `\n${fence}text\n${piece}\n${fence}\n`;
     } else {
-      const ticks = "`".repeat(Math.max(1, (piece.match(/`+/g) ?? []).reduce((m, t) => Math.max(m, t.length), 0) + 1));
+      const ticks = fenceFor(piece).slice(2); // one more backtick than any run inside, at least one
       replacement = `${ticks}${piece}${ticks}`;
     }
     out = out.slice(0, v.from) + replacement + out.slice(v.to);
@@ -249,7 +264,26 @@ export function quarantine(source: string, violations: Violation[]): string {
   return out;
 }
 
-const cell = (s: string) => "`" + s.replace(/`/g, "'").replace(/\|/g, "\\|").replace(/\n/g, " ") + "`";
+/** The report page may contain no directive at all, whatever a page name, a detail or a file name holds. */
+const NO_DIRECTIVES = compileAllowlist([]);
+
+/**
+ * Makes sure the report page is inert: if the rendered page holds a directive, a baked marker or an
+ * executable fence (a page name such as `A ${...}` would smuggle one in), the whole report goes into
+ * one fenced block that nothing inside can close.
+ */
+export function safeReport(text: string): string {
+  const verdict = checkPage(text, NO_DIRECTIVES);
+  if (verdict.ok && verdict.directives === 0) return text;
+  const fence = fenceFor(text);
+  return `# Report\n\nA name or a detail in this report would have been live Markdown; the report is shown as plain text.\n\n${fence}text\n${text}\n${fence}\n`;
+}
+
+/** Page names that are safe inside a wiki link; everything else goes into a code span. */
+const LINKABLE = /^[A-Za-z0-9 _.()/-]+$/;
+const pageRef = (page: string) => (LINKABLE.test(page) ? `[[${page}]]` : cell(page));
+
+const cell = (s: string) => "`" + s.replace(/`/g, "'").replace(/\|/g, "\\|").replace(/\n/g, " ").replace(/\$\{/g, "$ {") + "`";
 
 /** The report page (docs/security.md, section 8). Holds no directive: every detail is in a code span. */
 export function renderReport(space: string, s: SpaceState, state: State, config: Config, fileCount: number): string {
@@ -271,12 +305,13 @@ export function renderReport(space: string, s: SpaceState, state: State, config:
   lines.push(`## Findings (${s.findings.length})`, "");
   if (s.findings.length) {
     lines.push("| Page | Line | Rule | Detail |", "|---|---|---|---|");
-    for (const f of s.findings) lines.push(`| [[${f.page.replace(/\]/g, "")}]] | ${f.line} | ${cell(f.rule)} | ${cell(f.detail)} |`);
-  } else lines.push("None: every page outside CONFIG and Library/ is data.");
+    for (const f of s.findings) lines.push(`| ${pageRef(f.page)} | ${f.line} | ${cell(f.rule)} | ${cell(f.detail)} |`);
+  } else if (!state.allowlist.ok) lines.push("Pages were not checked: the allowlist is invalid, and the server refuses to serve.");
+  else lines.push("None: every page outside CONFIG and Library/ is data.");
   lines.push("");
   if (s.quarantined.length) {
     lines.push(`## Quarantined in this run (${s.quarantined.length})`, "");
-    for (const p of s.quarantined) lines.push(`* [[${p}]]`);
+    for (const p of s.quarantined) lines.push(`* ${pageRef(p)}`);
     lines.push("");
   }
   lines.push(`## Files that are not pages (${s.files.length})`, "");
