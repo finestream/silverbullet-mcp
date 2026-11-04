@@ -27,7 +27,6 @@ index.metaPages
 index.objects
 index.pages
 index.paragraphs
-index.queryLuaObjects
 index.relations
 index.resolveAnchor
 index.subPages

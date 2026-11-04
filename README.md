@@ -27,7 +27,7 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 
 ## Status
 
-**Core server and rendering, phases 1a and 1b.** The server in `src/` serves the ten tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, the refusal to serve, and the two render tools over SilverBullet's Runtime API. Not yet: the deployment next to a production instance (1c) and OAuth (2). The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
+**Core server and rendering, phases 1a and 1b.** The server in `src/` serves the ten tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, the refusal to serve, and the two render tools over SilverBullet's Runtime API. Phase 1c adds the deployment material: the client guide and the acceptance test below. Not yet: OAuth (2). The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
 
 ## What is here
 
@@ -40,6 +40,7 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 | [`src/`](src) | The server: `main.ts` (entry, `--scan`, `--hash`), `server.ts` (HTTP, auth), `tools.ts` (the tools), `filter/` (the write filter on the vendored parser, the allowlist), `access.ts`, `credentials.ts`, `scan.ts`, `render.ts` (the render path over the Runtime API), `edit.ts`; unit tests beside the code |
 | [`config/`](config) | The shipped allowlist and examples of the credentials file, the access list and the allowed-files list |
 | [`test/`](test) | The release checks (a compose test instance, a bootstrap through the admin API, one check per assumption, a report per SilverBullet version) and, in `test/server/`, the server's integration tests against the same instance |
+| [`scripts/acceptance.ts`](scripts/acceptance.ts) | The acceptance test of a running server, from any machine that reaches it (*Acceptance test* below) |
 | [`Dockerfile`](Dockerfile), [`compose.example.yaml`](compose.example.yaml) | The image (`node:24-alpine`, non-root) and how to run it next to SilverBullet with secrets from files |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Lint, unit and integration tests on every pull request; the image to `ghcr.io/finestream/silverbullet-mcp` on a version tag |
 
@@ -55,6 +56,42 @@ MCP_CREDENTIALS_FILE=./secrets/credentials MCP_CONFIG_DIR=./config SB_URL=http:/
 The server listens on `PORT` (default 4000): `POST /mcp` is the MCP endpoint (streamable HTTP, stateless, bearer in the `Authorization` header), `GET /healthz` the health check. Clients that speak only stdio reach it through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) with the bearer as a header. The image does the same: see [compose.example.yaml](compose.example.yaml).
 
 Two more modes: `node src/main.ts --scan` runs one scan over the guarded spaces and exits with 1 on findings (the installation step of [docs/security.md](docs/security.md), section 7); `printf '%s' "$SECRET" | node src/main.ts --hash` prints the SHA-256 of a client secret for the credentials file.
+
+## Clients
+
+The server speaks MCP over streamable HTTP: `POST https://<host>/mcp` with the client's bearer in the `Authorization` header. A client that speaks HTTP itself needs no helper:
+
+```sh
+claude mcp add --scope user --transport http notes https://mcp.example.org/mcp --header "Authorization: Bearer $BEARER"   # Claude Code
+```
+
+A client that speaks only stdio, such as the Claude desktop app, reaches it through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote). The bearer goes into an environment variable, because the app does not pass arguments with spaces reliably:
+
+```json
+{
+  "mcpServers": {
+    "notes": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.example.org/mcp", "--header", "Authorization:${AUTH_HEADER}", "--transport", "http-only"],
+      "env": { "AUTH_HEADER": "Bearer <the client's bearer>" }
+    }
+  }
+}
+```
+
+One bearer per client (`printf '%s' "$BEARER" | node src/main.ts --hash` gives the hash for the credentials file); a scheduled or unattended run uses the connector of the app it runs in, with that connector's bearer. A client never holds a SilverBullet API token.
+
+## Acceptance test
+
+`scripts/acceptance.ts` checks a running server from any machine that reaches it, as one user, and prints `PASS` or `FAIL` per check: a wrong bearer is refused with 401 and `/healthz` answers; `list-spaces` shows the spaces with the effective rights; a denied page is absent from listings and search and refused on read by the access list; a page is read raw with its revision; `render-note` and `screenshot-note` are either evaluated (a PNG) or refused by the access list, as `MCP_EXPECT_RENDER` says; a write outside the user's area is refused by the access list; a page with a `space-lua` block inside it is refused by the write filter with rule and line; a stale `edit-note` is rejected and the current revision accepted; the report page shows *serving*, a scan and no findings. It writes one page under `MCP_WRITE_AREA` and deletes it again where the user may.
+
+```sh
+npm ci
+MCP_URL=https://mcp.example.org/mcp MCP_BEARER=… MCP_RAW_PAGE="A page with queries" MCP_SCREENSHOT_PAGE=index \
+  MCP_WRITE_AREA="Shared/Bot/" MCP_DENIED_PAGE=CONFIG MCP_DENIED_TEXT="config.set" MCP_EXPECT_RENDER=no node scripts/acceptance.ts
+```
+
+`MCP_SPACE` selects a space other than the user's default; `MCP_OUTSIDE_PAGE` (default `Acceptance outside`) names a page the user may not create; `MCP_REPORT_PAGE` defaults to `MCP Server`. Exit code 0 when every check passed, 1 otherwise, 2 when the test could not run.
 
 ## Configuration
 
