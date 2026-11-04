@@ -47,9 +47,9 @@ test("auth: GET and DELETE on /mcp are 405 (stateless); /healthz answers without
   assert.deepEqual(Object.keys(body).sort(), ["ok", "scanning", "version"], "nothing about the spaces without a bearer");
 });
 
-test("tools: the v1-compatible tool names, no search-replace-note", async () => {
+test("tools: the v1-compatible tool names plus the two render tools, no search-replace-note", async () => {
   const names = await alice.tools();
-  assert.deepEqual(names.sort(), ["create-note", "delete-note", "edit-note", "list-notes", "list-spaces", "read-multiple-notes", "read-note", "search-notes"]);
+  assert.deepEqual(names.sort(), ["create-note", "delete-note", "edit-note", "list-notes", "list-spaces", "read-multiple-notes", "read-note", "render-note", "screenshot-note", "search-notes"]);
 });
 
 test("access: deny by default: a page without any entry is refused by the access list, not by SilverBullet", async () => {
@@ -118,7 +118,7 @@ test("access: an entry for a space SilverBullet does not grant has no effect; Si
   assert.equal(r.isError, true);
   assert.match(r.text, /^SilverBullet refused: SilverBullet refused access \(403/);
   const spaces = await alice.call("list-spaces");
-  assert.deepEqual((spaces.data!.spaces as Array<{ space: string }>).map((s) => s.space), ["alpha"], "list-spaces shows only what SilverBullet grants");
+  assert.deepEqual((spaces.data!.spaces as Array<{ space: string }>).map((s) => s.space), ["alpha", "gamma"], "list-spaces shows only what SilverBullet grants");
 });
 
 test("access: two users see different listings of the same space; carol sees nothing in her default space", async () => {
