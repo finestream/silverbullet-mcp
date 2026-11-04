@@ -6,7 +6,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { parser as mdParser } from "@lezer/markdown";
-import { checkPage } from "../write-filter/filter.ts";
+import { checkPage } from "../../src/filter/filter.ts";
+import { shippedAllowlist } from "../../src/filter/allowlist.ts";
 import { sb, T } from "../lib/env.ts";
 
 const chunk = `## Section
@@ -44,7 +45,7 @@ function median(fn: () => unknown, runs = 30) {
 test("cost: the write filter checks a 50 KB page with ~200 directives in well under 100 ms", (t) => {
   let page = "";
   while (page.length < 50 * 1024) page += chunk;
-  const allow = ["query", "template.*", "templates.*", "index.*", "views.*", "string.*"];
+  const allow = shippedAllowlist();
   const verdict = checkPage(page, allow);
   assert.ok(verdict.ok, "the benchmark page is accepted");
   const md = median(() => mdParser.parse(page));

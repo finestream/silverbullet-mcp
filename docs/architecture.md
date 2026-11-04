@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposed** (2026-10-30, revised 2026-11-03). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The terms *user* (a SilverBullet account), *person*, *agent* and *operator* are those of [security.md](security.md), section 1. The release checks in [`test/`](../test/) re-take the measurements below on every SilverBullet release.
+Status: **proposed** (2026-10-30, revised 2026-11-04 with the core server). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The terms *user* (a SilverBullet account), *person*, *agent* and *operator* are those of [security.md](security.md), section 1. The release checks in [`test/`](../test/) re-take the measurements below on every SilverBullet release.
 
 ## Goal
 
@@ -16,7 +16,7 @@ The goals are stated once, in the [README](../README.md#goals); this document sa
 | Auth, phase 1 | **Server-side credential map**: client bearer → user → that user's SilverBullet API token. No passthrough |
 | Auth, phase 2 | OAuth 2.1 **resource server**; an external OIDC provider (for example Keycloak) issues the tokens; the user claim selects the entry in the same map |
 | Access control | SilverBullet is the ceiling; below it an **access list** per user or group, space and path (`r`, `w`, `d`, `x`, `-`), deny by default, the most specific path wins, applied to every tool |
-| Content | Pages hold no code: a **write filter** with an **allowlist** of the functions a page may call, a **scan** of the space, an **index-time transform** in `CONFIG`, and a **refusal to serve** while any of these is missing or has findings ([security.md](security.md)) |
+| Content | Pages hold no code: a **write filter** with an **allowlist** of the functions a page may call, a **scan** of the space, an **index-time transform** in `CONFIG`, a **refusal to serve** while a control is missing, and **no rendering in a space with findings** ([security.md](security.md)) |
 | Addressing | A **`space` parameter** on every tool (default: the user's default space); a `list-spaces` tool |
 | Space discovery | `GET /<space>/.config` with the user's token: it lists every space prefix and the user's `readOnly` flag; each space is probed with the user's token |
 | Raw read | `/.fs` API with `ETag` / `If-Match`; never touches the Runtime API |
@@ -102,7 +102,7 @@ The other SilverBullet MCP servers on GitHub on 2026-10-30 (found by searching f
 
 Go and Python were possible too: both have official MCP SDKs.
 
-TypeScript because SilverBullet itself, its plug API, both candidate servers and the most complete MCP SDK are TypeScript, and the maintainer of this server reads it. Current Node.js versions run `.ts` files directly (type stripping), so the spike and tests need no build step; the server is compiled for the image.
+TypeScript because SilverBullet itself, its plug API, both candidate servers and the most complete MCP SDK are TypeScript, and the maintainer of this server reads it. Current Node.js versions run `.ts` files directly (type stripping), so neither the server nor the tests need a build step; the image runs the same sources on Node.js 24, and `tsc` only type-checks.
 
 ### 2. Auth: server-side credential map (phase 1), resource server (phase 2)
 
@@ -112,9 +112,9 @@ client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverB
                                       └─ credentials file: sha256(client secret) → { user, sbToken, defaultSpace, groups }
 ```
 
-* One entry per user (a user may have several client secrets, one per client, to revoke them separately). The file holds the **SHA-256 of each client secret**, never the secret itself, the user's SilverBullet token, the user's default space and the **groups** the user belongs to. It is mounted read-only as a secret file; the server re-reads it on change. Adding a user is one entry here plus its lines in the access list (section 3), or none if a group entry already covers it. One more entry holds the token of the technical user that runs the scan, a write member of each guarded space ([security.md](security.md), section 7).
+* One line per user (a user may have several client secrets, one per client, to revoke them separately). The file holds the **SHA-256 of each client secret**, never the secret itself, the user's SilverBullet token, the user's default space and the **groups** the user belongs to ([`config/credentials.example`](../config/credentials.example); `node src/main.ts --hash` prints the hash of a secret). It is mounted read-only as a secret file; the server re-reads it on change. Adding a user is one line here plus its lines in the access list (section 3), or none if a group entry already covers it. One more line holds the token of the technical user `scan` that runs the scan, a write member of each guarded space ([security.md](security.md), section 7).
 * The SilverBullet token never leaves the server. A leaked client secret works only against the MCP server's tools and is revoked by deleting its line; the SilverBullet token is revoked in the SilverBullet Dashboard.
-* **Everything is keyed by user**: the page listing cache per `(user, space)` (TTL 30 s, dropped on the server's own writes), rate limits per user, render queues per `(user, space)`. No content is cached across users.
+* **Everything is keyed by user**: the page listing cache per `(user, space)` (TTL 30 s, dropped on the server's own writes), the rate limit per user (tool calls per minute), render queues per `(user, space)`. No content is cached across users. Every request is one line of the structured log: time, user, space, tool, outcome, duration; never contents, never tokens.
 
 **Passthrough** (the client sends its SilverBullet token, the server forwards it) was considered again and rejected:
 
@@ -122,7 +122,7 @@ client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverB
 * *The client holds the real credential*: still holds. A SilverBullet token can do more than the MCP tools (Runtime API with arbitrary Lua, shell and proxy endpoints where enabled).
 * *MCP forbids token passthrough*: still holds. The [MCP security best practices](https://modelcontextprotocol.io/specification/latest/basic/security_best_practices) forbid accepting tokens not issued for the MCP server and forwarding them downstream. Phase 2 needs audience-bound tokens for the MCP server (RFC 8707), which would then be mapped to SilverBullet tokens anyway, so the map is needed in any case.
 
-**Phase 2** replaces the bearer check with OAuth 2.1 token verification (issuer, audience = the MCP server's URL, expiry), publishes `/.well-known/oauth-protected-resource`, and looks the user up by a claim (`preferred_username`) in the same credentials file. The tokens come from an external OIDC provider (for example Keycloak); the MCP server is only a resource server and runs no authorization server of its own. The auth layer is one module with one interface (`authenticate(req) → user | 401`), so phase 2 swaps it without touching the tools. Until phase 2, clients that speak only stdio reach the server through `mcp-remote` (the npm bridge that lets a stdio-only client talk to a remote HTTP MCP server) with a static bearer; clients that require OAuth (for example web connectors) can connect only from phase 2 on.
+**Phase 2** replaces the bearer check with OAuth 2.1 token verification (issuer, audience = the MCP server's URL, expiry), publishes `/.well-known/oauth-protected-resource`, and looks the user up by a claim (`preferred_username`) in the same credentials file. The tokens come from an external OIDC provider (for example Keycloak); the MCP server is only a resource server and runs no authorization server of its own. The auth layer is one module with one interface (`authenticate(req) → user | null`, [`src/server.ts`](../src/server.ts)), so phase 2 swaps it without touching the tools. Until phase 2, clients that speak only stdio reach the server through `mcp-remote` (the npm bridge that lets a stdio-only client talk to a remote HTTP MCP server) with a static bearer; clients that require OAuth (for example web connectors) can connect only from phase 2 on.
 
 **No admin token.** The server holds only the users' own SilverBullet tokens and the scan user's. Rejected alternatives:
 
@@ -157,7 +157,7 @@ Every tool takes `space` (the prefix, `alpha` for `/alpha`); omitted, the user's
 
 ### 5. Rendering: opt-in tools over the Runtime API
 
-* `render-note` (Markdown) and `screenshot-note` (PNG as MCP image content) are separate tools. They need **`x` in the access list** for the page, and only work where SilverBullet grants that user Write and the Runtime API; a user with read-only access to a space cannot render there. `read-note` stays on `/.fs` and never starts Chrome. Both render `.md` pages only.
+* `render-note` (Markdown) and `screenshot-note` (PNG as MCP image content) are separate tools. They need **`x` in the access list** for the page, and only work where SilverBullet grants that user Write and the Runtime API; a user with read-only access to a space cannot render there. They are refused in a space whose last scan has findings ([security.md](security.md), section 7; the state is `renderBlock(space)` in [`src/state.ts`](../src/state.ts)). `read-note` stays on `/.fs` and never starts Chrome. Both render `.md` pages only.
 * **Rendering is for reading; editing works on the source.** `read-note` returns the raw Markdown as stored, with its `revision`; `render-note` returns the expansion and no `revision`, and `edit-note` requires one, so every edit is based on the source. After a write, a render waits (bounded) until the runtime's index holds the new revision, with a fresh runtime as fallback ([security.md](security.md), section 12).
 * One **queue per `(user, space)`**: renders and screenshots on the same runtime run one at a time (the `_CTX` shim and navigate-then-capture are not concurrent-safe).
 * The render script shadows `space.write*`/`delete*`. It is documented as best-effort (see the finding above): Lua in a page can still write through the runtime's browser with the user's full space rights, past the access list. What makes `x` safe to grant is that pages hold no code: the write filter, the scan and the index-time transform ([security.md](security.md), sections 5, 7 and 10). A page that writes when rendered does the same when opened in the browser and is a defect of that page.
@@ -167,24 +167,24 @@ Every tool takes `space` (the prefix, `alpha` for `/alpha`); omitted, the user's
 
 ### 6. Deployment
 
-One container (`node:24-alpine`, non-root, read-only root filesystem) on the same Docker network as SilverBullet, talking to `http://silverbullet:3000/<space>` directly. It is exposed through the reverse proxy on its own hostname; the MCP server checks the bearer itself. The credentials file and the access list are compose secrets. Health: `GET /healthz`. The headless Chrome runs **inside the SilverBullet container** (SilverBullet's own runtime), so the SilverBullet container's memory limit must allow ~200 MiB plus the space's index for every allowed `(user, space)` render pair. The operator checks that limit before allowing rendering for more than one or two pairs.
+One container (`node:24-alpine`, non-root, read-only root filesystem; [`Dockerfile`](../Dockerfile), [`compose.example.yaml`](../compose.example.yaml)) on the same Docker network as SilverBullet, talking to `http://silverbullet:3000/<space>` directly. It is exposed through the reverse proxy on its own hostname; the MCP server checks the bearer itself. The credentials file is a compose secret; the access list, the allowlist and the allowed-files list are configuration files mounted read-only. Health: `GET /healthz`. The image is built by CI and pushed to `ghcr.io/finestream/silverbullet-mcp` on a version tag. The headless Chrome runs **inside the SilverBullet container** (SilverBullet's own runtime), so the SilverBullet container's memory limit must allow ~200 MiB plus the space's index for every allowed `(user, space)` render pair. The operator checks that limit before allowing rendering for more than one or two pairs.
 
 ## Tool surface (phase 1)
 
 | Tool | SilverBullet call | Notes |
 |---|---|---|
-| `list-spaces` | `GET /<s>/.config` per prefix | `{space, access}`, narrowed by the access list |
-| `list-notes` | `GET /<s>/.fs` | `namePattern`, cursor paging |
-| `read-note` | `GET /<s>/.fs/<path>` | returns `revision` (the ETag), offset/limit |
+| `list-spaces` | `GET /<s>/.config` per prefix | SilverBullet's `read`/`write`, the access-list entries that apply, and the server's state per space (refusal, render block) |
+| `list-notes` | `GET /<s>/.fs` | pages and other files the user may read; `namePattern`, cursor paging |
+| `read-note` | `GET /<s>/.fs/<path>` | returns `revision` (the ETag), offset/limit; `.md` added to a name without extension; other files as text or base64 |
 | `read-multiple-notes` | as above | |
 | `search-notes` | `/.fs` + match in server | `/.search` when available |
-| `create-note` | `PUT` + `If-None-Match: *` | write filter on the result |
-| `edit-note` | `GET`, then `PUT` + `If-Match` | `expectedRevision`, `dryRun` returns the diff; write filter on the result |
-| `delete-note` | `DELETE` + `If-Match` | needs `d` |
+| `create-note` | `PUT` + `If-None-Match: *` | file-type check, write filter on the result; `overwrite` for a plain `PUT` |
+| `edit-note` | `GET`, then `PUT` + `If-Match` | `expectedRevision` required, `dryRun` returns the diff; write filter on the result |
+| `delete-note` | `DELETE` + `If-Match` | needs `d`; `expectedRevision` optional |
 | `render-note` | `POST /<s>/.runtime/lua_script` | needs `x`; `.md` only; no `revision` |
 | `screenshot-note` | `lua_script` + `GET /<s>/.runtime/screenshot` | needs `x`; `.md` only; `selector` |
 
-Every tool checks the access list before calling SilverBullet: `r` for the read tools, `w` for `create-note` and `edit-note`, which also run the write filter and the file-type check ([security.md](security.md), section 5). While the server is in its refuse-to-serve state ([security.md](security.md), section 9), only `list-spaces` and the health endpoint answer.
+Every tool resolves the space (the parameter, else the user's default space), checks the refuse-to-serve state of the server and the space ([security.md](security.md), section 9), then the access list: `r` for the read tools, `r` and `w` for `edit-note`, `w` for `create-note`, `d` for `delete-note`; the two write tools also run the file-type check and the write filter ([security.md](security.md), section 5). A refusal says which control refused: the access list (with the effective rights), the write filter (with rule and line), the file-type rule, the refuse-to-serve state, a revision conflict, a malformed name; SilverBullet's own refusals are passed through with their status, without the internal URL. While the server is in its refuse-to-serve state, only `list-spaces` and the health endpoint answer; while a space has scan findings, its render tools answer with the error that names them.
 
 `search-replace-note` from v1 is not carried over: it replaces case-insensitively everywhere without a revision check, and `edit-note` covers its use.
 
@@ -208,9 +208,11 @@ Changes in SilverBullet that would simplify or strengthen this architecture. Eac
 
 The measurements were taken on the compose set-up of [`test/`](../test/): SilverBullet 2.12 in multi-space mode, two spaces, two users with different grants, bootstrapped through the admin API in one command (idempotent, tokens written to a git-ignored state file).
 
-| Space | Path | alice | bob |
-|---|---|---|---|
-| alpha | `/alpha` | write + Runtime API | read |
-| beta | `/beta` | — | write + Runtime API |
+| Space | Path | alice | bob | scan |
+|---|---|---|---|---|
+| alpha | `/alpha` | write + Runtime API | read | write |
+| beta | `/beta` | — | write + Runtime API | write |
+
+`scan` is the server's technical user ([security.md](security.md), section 7). The server's integration tests in [`test/server/`](../test/server/) run against the same instance.
 
 The Runtime API needs no manual step: `silverbullet setup` writes `runtimeApi: true` to `server.json`, and the bootstrap also sets it through `PUT /.dashboard/api/admin/server-config`. Everything is created through SilverBullet's admin API (the same sequence its own multi-space end-to-end test uses), so CI can run it.

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2024"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "eslint.config.js"],
+  "exclude": ["node_modules", "src/filter/vendor"]
+}

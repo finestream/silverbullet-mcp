@@ -1,10 +1,10 @@
 # Facts: a write filter on SilverBullet's Lua parser
 
-Can the server reject a page that carries code it should not carry, using SilverBullet's own Lua parser instead of a regex? Answered with the code now under `test/write-filter/` (`filter.ts`, `cases.ts`, `run.ts`, `bench.ts`, `vendor/silverbullet/`; the release checks run its matrix), SilverBullet source at tag `2.12.1`, the npm registry as of 2026-11-03, Node 26 on Apple silicon.
+Can the server reject a page that carries code it should not carry, using SilverBullet's own Lua parser instead of a regex? Answered with the code of the spike, now the server's filter under `src/filter/` (`filter.ts`, `cases.ts`, `vendor/silverbullet/`; the unit test and the release checks run its matrix), SilverBullet source at tag `2.12.1`, the npm registry as of 2026-11-03, Node 26 on Apple silicon.
 
 ## 1. Can SilverBullet's Lua parser be imported?
 
-**Answer.** Not from the npm package; yes by copying four files. The parser is a lezer grammar (`client/space_lua/lua.grammar`, based on R167/lezer-lua) compiled to `parse-lua.js` (19 KB) with `parse-lua.terms.js` and an external comment tokenizer `lua_comment.js`. Runtime dependencies: `@lezer/lr` and `@lezer/common` only. Copied unchanged into `test/write-filter/vendor/silverbullet/` with SilverBullet's `LICENSE.md` (MIT); the attribution is in that directory's README and in the repository's.
+**Answer.** Not from the npm package; yes by copying four files. The parser is a lezer grammar (`client/space_lua/lua.grammar`, based on R167/lezer-lua) compiled to `parse-lua.js` (19 KB) with `parse-lua.terms.js` and an external comment tokenizer `lua_comment.js`. Runtime dependencies: `@lezer/lr` and `@lezer/common` only. Copied unchanged into `src/filter/vendor/silverbullet/` with SilverBullet's `LICENSE.md` (MIT); the attribution is in that directory's README and in the repository's.
 
 Evidence:
 
@@ -39,7 +39,7 @@ The whole filter is 200 lines; the walk itself about 60. The spike's denied name
 
 ## 4. Test matrix
 
-Run: `node run.ts`. *minimal* = `query`, `template.*` (the list the security model started with); *extended* = minimal + `index.*`, `string.*`, `views.*`. Bold = differs from the expectation.
+The matrix of the spike, 41 cases, with two lists: *minimal* = `query`, `template.*` (the list the security model started with); *extended* = minimal + `index.*`, `string.*`, `views.*`. Bold = differs from the expectation. The server's filter runs a matrix of 69 cases with the shipped allowlist (`node --test src/filter/filter.test.ts`): these 41 and the cases for the rules added after the spike, references governed by the allowlist, named query rows, aggregates, the tag argument of `index.*`, baked sections, and the functions that evaluate their input ([security.md](../security.md), sections 5 and 6).
 
 | id | case | expected | minimal | extended | reasons (extended list) |
 |---|---|---|---|---|---|
@@ -91,7 +91,7 @@ What the minimal list shows: pages of a typical space need `index.*` (every quer
 
 ## 5. Cost
 
-**Answer.** 6.9 ms per 50 KB page (median of 50 runs; min 6.6, max 9.1), of which 3.4 ms is the Markdown parse. The page: 1 837 lines, 306 `${` occurrences, 204 checked directives (the rest sit in code spans and blocks), tables, lists, a `lua` fence. Sequential estimate for 3 000 such pages: 21 s; real pages are smaller and carry few directives, so a scan of a few thousand pages is seconds, not minutes. Run: `node bench.ts` (Apple silicon, Node 26). No measurement of memory.
+**Answer.** 6.9 ms per 50 KB page (median of 50 runs; min 6.6, max 9.1), of which 3.4 ms is the Markdown parse. The page: 1 837 lines, 306 `${` occurrences, 204 checked directives (the rest sit in code spans and blocks), tables, lists, a `lua` fence. Sequential estimate for 3 000 such pages: 21 s; real pages are smaller and carry few directives, so a scan of a few thousand pages is seconds, not minutes. The release check `06-cost` takes the measurement on every run (Apple silicon, Node 26). No measurement of memory.
 
 ## Open points and surprises
 

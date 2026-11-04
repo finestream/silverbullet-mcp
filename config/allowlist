@@ -1,0 +1,38 @@
+# The allowlist of the write filter: what a page outside CONFIG and Library/
+# may call or reference (docs/security.md, section 6). One entry per line:
+# `name`, `name.sub`, `name.*` or `*.method`. Every entry is audited before
+# it is added; the never-allowed names cannot be added, the server refuses to
+# serve on an entry that covers one. This file is the shipped default, which
+# the image carries at /etc/silverbullet-mcp/allowlist.
+
+query
+template.each
+templates.*
+views.*
+string.*
+
+# The index functions that read; the ones that write or register are never allowed.
+index.aggregates
+index.aspiringPages
+index.contentPages
+index.describeSchema
+index.documents
+index.extractFrontmatter
+index.getObjectByRef
+index.headers
+index.isAvailable
+index.items
+index.links
+index.metaPages
+index.objects
+index.pages
+index.paragraphs
+index.queryLuaObjects
+index.relations
+index.resolveAnchor
+index.subPages
+index.tables
+index.tag
+index.tagSchema
+index.tags
+index.tasks

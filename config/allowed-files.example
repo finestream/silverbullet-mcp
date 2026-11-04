@@ -1,0 +1,6 @@
+# Files that are not pages and that the scan may ignore (docs/security.md,
+# section 7). One per line: `space path`, where path is a file or a folder
+# ending in /, and space may be *. Optional; without the file nothing is allowed.
+
+notes   Attachments/
+notes   Library/Std/Plugs/custom.plug.js

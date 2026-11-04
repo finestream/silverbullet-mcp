@@ -1,5 +1,6 @@
-// Test matrix for the write filter spike. `expect` is what the security model
-// asks for; the run records what the filter actually says.
+// Test matrix of the write filter (docs/facts/write-filter.md, section 4, plus the
+// rules the security model added after the spike). `expect` is what the
+// security model asks for; the unit test and the release checks run it.
 
 export type Case = { id: string; name: string; expect: "accept" | "reject"; page: string };
 
@@ -11,7 +12,7 @@ export const cases: Case[] = [
   { id: "T2", name: "_G with concatenated name", expect: "reject", page: 'Secret: ${_G["sp".."ace"].readPage("CONFIG")}\n' },
   { id: "T3", name: "load(...)()", expect: "reject", page: '${load("return space.readPage(\\"CONFIG\\")")()}\n' },
   { id: "T4", name: "query with space.readPage in where", expect: "reject", page: '${query[[from index.tag "page" where space.readPage(name)]]}\n' },
-  { id: "T5", name: "harmless template.each over a query", expect: "accept", page: '${template.each(query[[from index.tag "page" limit 3]], templates.pageItem)}\n' },
+  { id: "T5", name: "harmless template.each over a query", expect: "accept", page: '${template.each(query[[from p = index.tag "page" limit 3]], templates.pageItem)}\n' },
   { id: "T6", name: "page with a space-lua fence", expect: "reject", page: "Text.\n\n" + fence("space-lua", 'function f() return space.readPage("CONFIG") end') },
   { id: "T7", name: "page with a lua fence", expect: "accept", page: "Example:\n\n" + fence("lua", 'function f() return space.readPage("CONFIG") end') },
   { id: "T8a", name: "${ inside a code span", expect: "accept", page: 'Write `${space.readPage("CONFIG")}` to read a page.\n' },
@@ -59,4 +60,42 @@ export const cases: Case[] = [
   { id: "X1", name: "backtick inside a directive opens a code span that ends before a second directive", expect: "reject", page: '${"`"} text `${space.readPage("CONFIG")}` tail\n' },
   { id: "X2", name: "directive between two code spans", expect: "reject", page: '`a` ${space.readPage("CONFIG")} `b`\n' },
   { id: "X3", name: "backtick in a directive string, no second backtick", expect: "reject", page: '${space.readPage("`")}\n' },
+
+  // References are governed by the allowlist, not only calls (security.md, section 5)
+  { id: "R1", name: "bare global reference outside a query", expect: "reject", page: "${foo}\n" },
+  { id: "R2", name: "value reference in a table key", expect: "reject", page: "${template.each({x = space}, templates.pageItem)}\n" },
+  { id: "R3", name: "reference rooted in a parenthesis", expect: "reject", page: "${template.each({1}, (template).new)}\n" },
+  { id: "R4", name: "function reference passed as a value from a select clause", expect: "reject", page: '${query[[from index.tag "page" select template.each({"CONFIG"}, space.readPage)]]}\n' },
+  { id: "R5", name: "a namespace bound as a query source, then a method on it", expect: "reject", page: '${query[[from x = {template} select x.new("x")]]}\n' },
+
+  // Functions that evaluate their input or write (never allowed, security.md section 6)
+  { id: "E1", name: "template.new with a directive in its string", expect: "reject", page: "${template.each({1}, template.new(\"${space.readPage('CONFIG')}\"))}\n" },
+  { id: "E2", name: "index.indexObjects", expect: "reject", page: '${index.indexObjects("x", {})}\n' },
+  { id: "E3", name: "index.defineTag", expect: "reject", page: '${index.defineTag({name = "x"})}\n' },
+
+  // Query clauses: fields, bound variables, aggregates (security.md, section 5)
+  { id: "Q1", name: "a query without a named row (fields would shadow globals)", expect: "reject", page: '${query[[from index.tag "page" where status == "active" select name]]}\n' },
+  { id: "Q2", name: "the implicit variable _ of an unnamed query", expect: "reject", page: '${query[[from index.tag "page" select _.tags[1]]]}\n' },
+  { id: "Q2b", name: "the same query with a named row", expect: "accept", page: '${query[[from p = index.tag "page" where p.status == "active" select p.name]]}\n' },
+  { id: "Q3", name: "group by with key, group and count()", expect: "accept", page: '${query[[from p = index.objects("tag") group by p.name select {key = key, n = #group, c = count()}]]}\n' },
+  { id: "Q4", name: "a nested query uses the outer variable", expect: "accept", page: '${query[[from p = index.tag "page" select query[[from q = index.tag "item" where q.page == p.name]]]]}\n' },
+  { id: "Q5", name: "a method on a query variable", expect: "reject", page: '${query[[from p = index.tag "page" where p.name:startsWith("A")]]}\n' },
+  { id: "Q6", name: "a bare global passed as a callback inside a clause", expect: "reject", page: '${query[[from p = index.tag "page" select template.each({"CONFIG"}, readAll)]]}\n' },
+  { id: "Q7", name: "order by using a named comparator", expect: "reject", page: '${query[[from p = index.tag "page" order by p.name using mycmp]]}\n' },
+  { id: "Q8", name: "an aggregate with a filter", expect: "accept", page: '${query[[from p = index.tag "page" group by p.status select {n = count() filter (where p.name == "x")}]]}\n' },
+
+  // The tag argument of a query or an index.* call (security.md, section 5)
+  { id: "G1", name: "tag argument is not a literal", expect: "reject", page: "${query[[from index.tag(x) select name]]}\n" },
+  { id: "G2", name: "tag argument is space-lua", expect: "reject", page: '${query[[from s = index.tag "space-lua" select s.ref]]}\n' },
+  { id: "G3", name: "index.objects with space-style", expect: "reject", page: '${index.objects("space-style")}\n' },
+  { id: "G4", name: "index.getObjectByRef with a literal tag", expect: "accept", page: '${index.getObjectByRef("A", "page", "A")}\n' },
+  { id: "G5", name: "index.getObjectByRef with a non-literal tag", expect: "reject", page: '${index.getObjectByRef("A", t, "A")}\n' },
+  { id: "G6", name: "index.pages() without a tag", expect: "accept", page: "${query[[from p = index.pages() limit 3]]}\n" },
+  { id: "G7", name: "index.queryLuaObjects takes a query as data (a Lua syntax tree as a table)", expect: "reject", page: '${index.queryLuaObjects("page", {where = {type = "Variable", name = "space"}})}\n' },
+
+  // Baked sections: the expression of `<!--#lua EXPR -->` is re-evaluated by a person's command
+  { id: "B1", name: "a baked section with code", expect: "reject", page: '<!--#lua space.readPage("CONFIG") -->\n| a |\n<!--/lua-->\n' },
+  { id: "B2", name: "a baked section with an allowed query", expect: "accept", page: '<!--#lua query[[from p = index.tag "page" select p.name]] -->\n| name |\n<!--/lua-->\n' },
+  { id: "B3", name: "a baked marker inside a code block is still found by SilverBullet's baker", expect: "reject", page: "```\n<!--#lua space.readPage(\"CONFIG\") -->\n```\n" },
+  { id: "B4", name: "a baked marker inside a code span", expect: "reject", page: "Text `<!--#lua config.get(\"x\") -->` more\n" },
 ];

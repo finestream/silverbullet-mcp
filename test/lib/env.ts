@@ -1,7 +1,8 @@
 // The instance the checks run against: URL and tokens from test/.state/env
 // (written by the bootstrap) or from the environment (SB_URL, SB_TOKEN_*).
 // The fixtures are fixed: users alice (write + Runtime API on alpha, nothing
-// on beta) and bob (read on alpha, write + Runtime API on beta), plus admin.
+// on beta), bob (read on alpha, write + Runtime API on beta) and scan (write on
+// both, the server's technical user), plus admin.
 
 import { existsSync, readFileSync } from "node:fs";
 import { client } from "./sb.ts";
@@ -16,6 +17,8 @@ export const DEFAULT_USER_PASSWORD = "user-test-password";
 
 export const SPACES = { alpha: "alpha", beta: "beta" } as const;
 export const USERS = ["alice", "bob"] as const;
+/** The server's technical user (docs/security.md, section 7): a write member of both spaces. */
+export const SCAN_USER = "scan";
 
 export function loadEnv(): Record<string, string> {
   const out: Record<string, string> = {};
@@ -26,7 +29,7 @@ export function loadEnv(): Record<string, string> {
       if (m) out[m[1]] = m[2];
     }
   }
-  for (const k of ["SB_URL", "SB_TOKEN_ADMIN", "SB_TOKEN_ALICE", "SB_TOKEN_BOB", "SB_USER_PASSWORD", "SB_ADMIN_PASSWORD"]) {
+  for (const k of ["SB_URL", "SB_TOKEN_ADMIN", "SB_TOKEN_ALICE", "SB_TOKEN_BOB", "SB_TOKEN_SCAN", "SB_USER_PASSWORD", "SB_ADMIN_PASSWORD"]) {
     if (process.env[k]) out[k] = process.env[k]!;
   }
   return out;
@@ -52,6 +55,9 @@ export const T = {
   },
   get bob() {
     return need("SB_TOKEN_BOB");
+  },
+  get scan() {
+    return need("SB_TOKEN_SCAN");
   },
 };
 export const userPassword = () => loadEnv().SB_USER_PASSWORD ?? DEFAULT_USER_PASSWORD;
