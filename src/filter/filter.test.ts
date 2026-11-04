@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { checkPage } from "./filter.ts";
 import { cases } from "./cases.ts";
+import { readFileSync } from "node:fs";
 import { compileAllowlist, parseAllowlist, SHIPPED_ALLOWLIST, shippedAllowlist, validateAllowlist } from "./allowlist.ts";
 
 test("filter: every case of the matrix gets the verdict the security model asks for, with the shipped allowlist", () => {
@@ -53,6 +54,12 @@ test("allowlist: the shipped list is valid and the file format parses comments a
   assert.deepEqual(validateAllowlist(SHIPPED_ALLOWLIST), []);
   const entries = parseAllowlist("# comment\n\nquery\ntemplate.each  # trailing\n  templates.*\n");
   assert.deepEqual(entries, ["query", "template.each", "templates.*"]);
+});
+
+test("allowlist: the shipped file config/allowlist is the shipped list and is valid (the image carries it; an invalid file refuses to serve)", () => {
+  const entries = parseAllowlist(readFileSync(new URL("../../config/allowlist", import.meta.url), "utf8"));
+  assert.deepEqual(entries, [...SHIPPED_ALLOWLIST]);
+  assert.deepEqual(validateAllowlist(entries), []);
 });
 
 test("allowlist: entries that name or cover a never-allowed name are invalid", () => {
