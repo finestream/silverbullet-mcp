@@ -41,6 +41,7 @@ Any Docker with Compose works; give the daemon or VM about 4 GB, since the conta
 | `checks/05-parser.test.ts` | The write-filter matrix (69 cases, `src/filter/cases.ts`) with the shipped allowlist; the four vendored parser files of `src/filter/vendor/` unchanged at the release's tag; the pinned `@lezer/*` versions (both need the network) |
 | `checks/06-cost.test.ts` | The filter's time per 50 KB page |
 | `checks/07-browser.test.ts` | A fresh browser client (service worker, IndexedDB) boots with the transform active; an API write is indexed with its script replaced and a reload loads nothing |
+| `checks/08-api.test.ts` | The never-allowed names and their reviewed members (`src/filter/allowlist.ts`): every reviewed member exists and behaves as reviewed (`os.date` formats the clock, `schema.*` return plain tables, `markdown.parseMarkdown` does not evaluate, …); every global of the release's Lua environment is classified, so a new API is noticed |
 
 Names that start with `[watch]` assert a limitation the design works around (`_CTX` unset, HTML tables, the `fetch` bypass, `fullPage` ignored, the `{}` defect, …). When such a check fails the report says *changed*: the release removed the limitation, and the workaround and the document that describes it need a look.
 
