@@ -62,6 +62,9 @@ export type HttpDeps = {
   configured: () => { ok: boolean; problems: string[] };
 };
 
+/** The largest request the server reads; a page is at most 1,000,000 characters. */
+const MAX_BODY = 4 * 1024 * 1024;
+
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
   res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(body));
@@ -88,6 +91,9 @@ export function createHttpServer(deps: HttpDeps): Server {
       res.setHeader("Allow", "POST");
       return rpcError(res, 405, -32000, "Method not allowed: this server is stateless; POST every request to /mcp.");
     }
+    const length = Number(req.headers["content-length"]);
+    if (!Number.isFinite(length)) return rpcError(res, 411, -32000, "Content-Length is required.");
+    if (length > MAX_BODY) return rpcError(res, 413, -32000, `The request body is larger than ${MAX_BODY} bytes.`);
     const user = deps.auth.authenticate(req);
     if (!user) {
       const ip = req.socket.remoteAddress ?? "?";

@@ -275,15 +275,18 @@ const NO_DIRECTIVES = compileAllowlist([]);
 export function safeReport(text: string): string {
   const verdict = checkPage(text, NO_DIRECTIVES);
   if (verdict.ok && verdict.directives === 0) return text;
-  const fence = fenceFor(text);
-  return `# Report\n\nA name or a detail in this report would have been live Markdown; the report is shown as plain text.\n\n${fence}text\n${text}\n${fence}\n`;
+  const plain = text.replace(/<!--#/g, "<!-- #");
+  const fence = fenceFor(plain);
+  return `# Report\n\nA name or a detail in this report would have been live Markdown; the report is shown as plain text.\n\n${fence}text\n${plain}\n${fence}\n`;
 }
 
 /** Page names that are safe inside a wiki link; everything else goes into a code span. */
 const LINKABLE = /^[A-Za-z0-9 _.()/-]+$/;
 const pageRef = (page: string) => (LINKABLE.test(page) ? `[[${page}]]` : cell(page));
 
-const cell = (s: string) => "`" + s.replace(/`/g, "'").replace(/\|/g, "\\|").replace(/\n/g, " ").replace(/\$\{/g, "$ {") + "`";
+/** Inert in SilverBullet whatever it held: no backtick, pipe or newline, no `${`, no baked marker (which the baker would find even inside a code span). */
+const inert = (s: string) => s.replace(/`/g, "'").replace(/\n/g, " ").replace(/\$\{/g, "$ {").replace(/<!--#/g, "<!-- #");
+const cell = (s: string) => "`" + inert(s).replace(/\|/g, "\\|") + "`";
 
 /** The report page (docs/security.md, section 8). Holds no directive: every detail is in a code span. */
 export function renderReport(space: string, s: SpaceState, state: State, config: Config, fileCount: number): string {

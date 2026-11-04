@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startServer, connect, BEARERS, DEFAULT_ACCESS_LIST, credentialsFile, unique } from "./harness.ts";
+import { startServer, connect, BEARERS, DEFAULT_ACCESS_LIST, credentialsFile, unique, type RunningServer, type McpClient } from "./harness.ts";
 import { sb, T, SB_URL } from "../lib/env.ts";
 import { configPage } from "../lib/transform.ts";
 import { SHIPPED_ALLOWLIST, compileAllowlist } from "../../src/filter/allowlist.ts";
@@ -79,9 +79,11 @@ test("refuse to serve: a malformed access list refuses every tool (a dropped lin
 test("report page: a page name or a detail with a directive cannot make the report page live", async () => {
   const evil = 'Evil ${space.readPage("CONFIG")}';
   await sb.write(T.admin, "beta", `${evil}.md`, "Body with `${1}` and ${space.readPage(\"CONFIG\")}\n");
-  const server = await startServer({ accessList: BETA_ACCESS });
-  const bob = await connect(server.url, BEARERS.bob);
+  let server: RunningServer | undefined;
+  let bob: McpClient | undefined;
   try {
+    server = await startServer({ accessList: BETA_ACCESS });
+    bob = await connect(server.url, BEARERS.bob);
     const report = await bob.call("read-note", { filename: "MCP Server", limit: 100_000 });
     assert.equal(report.isError, false, report.text);
     const verdict = checkPage(report.data!.content, compileAllowlist([]));
@@ -90,8 +92,8 @@ test("report page: a page name or a detail with a directive cannot make the repo
     assert.match(report.data!.content, /Evil/);
   } finally {
     await sb.remove(T.admin, "beta", `${evil}.md`);
-    await bob.close();
-    await server.stop();
+    await bob?.close();
+    await server?.stop();
   }
 });
 
@@ -111,9 +113,11 @@ test("refuse to serve: a space the scan user cannot reach is refused as unguarde
 test("scan findings: rendering is blocked in the space with findings only; read and write are served; a cleaned page lifts the block", async () => {
   const planted = unique("Planted");
   await sb.write(T.admin, "beta", `${planted}.md`, 'Leak: ${space.readPage("CONFIG")}\n');
-  const server = await startServer({ accessList: BETA_ACCESS });
-  const bob = await connect(server.url, BEARERS.bob);
+  let server: RunningServer | undefined;
+  let bob: McpClient | undefined;
   try {
+    server = await startServer({ accessList: BETA_ACCESS });
+    bob = await connect(server.url, BEARERS.bob);
     const spaces = await bob.call("list-spaces");
     const byName = Object.fromEntries((spaces.data!.spaces as Array<{ space: string; renderBlocked: string | null; refusal: string | null }>).map((s) => [s.space, s]));
     assert.match(byName.beta.renderBlocked ?? "", /^Rendering is blocked in space "beta": the last scan found 1 finding\(s\) on 1 page\(s\)/);
@@ -137,11 +141,10 @@ test("scan findings: rendering is blocked in the space with findings only; read 
     const beta = (after.data!.spaces as Array<{ space: string; renderBlocked: string | null }>).find((s) => s.space === "beta")!;
     assert.equal(beta.renderBlocked, null, "the cleaned page's findings are dropped at once");
 
-    await bob.call("delete-note", { filename: planted }); // no d for bob: cleaned up as admin
   } finally {
     await sb.remove(T.admin, "beta", `${planted}.md`);
-    await bob.close();
-    await server.stop();
+    await bob?.close();
+    await server?.stop();
   }
 });
 

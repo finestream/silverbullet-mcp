@@ -19,7 +19,7 @@ test("filter: the test matrix passes with the shipped allowlist", () => {
     .map((c) => ({ ...c, verdict: checkPage(c.page, shippedAllowlist()).ok ? "accept" : "reject" }))
     .filter((c) => c.verdict !== c.expect);
   assert.deepEqual(wrong.map((c) => `${c.id} ${c.name}: expected ${c.expect}, got ${c.verdict}`), []);
-  assert.equal(cases.length, 68);
+  assert.equal(cases.length, 69);
 });
 
 async function upstream(tag: string, path: string): Promise<string | null | undefined> {

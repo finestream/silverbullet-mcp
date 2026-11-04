@@ -11,7 +11,7 @@ test("filter: every case of the matrix gets the verdict the security model asks 
     .filter((c) => c.verdict !== c.expect)
     .map((c) => `${c.id} ${c.name}: expected ${c.expect}, got ${c.verdict}`);
   assert.deepEqual(wrong, []);
-  assert.equal(cases.length, 68);
+  assert.equal(cases.length, 69);
 });
 
 test("filter: a violation names the rule, the line and the range of the directive", () => {
@@ -25,6 +25,16 @@ test("filter: a violation names the rule, the line and the range of the directiv
   assert.equal(x.detail, "space.readPage");
   assert.equal(x.line, 5);
   assert.equal(page.slice(x.from, x.to), '${space.readPage("CONFIG")}');
+});
+
+test("filter: a page full of unclosed ${ is refused within a bounded time", () => {
+  const t0 = performance.now();
+  const v = checkPage("${".repeat(200_000), shippedAllowlist());
+  assert.equal(v.ok, false);
+  assert.equal(v.violations[0].rule, "too-complex");
+  assert.ok(performance.now() - t0 < 2000, `${Math.round(performance.now() - t0)} ms`);
+  // A realistic page with a few unclosed ${ is fine.
+  assert.ok(checkPage("Cost: ${ not closed\n".repeat(200) + "Sum ${1 + 1}\n", shippedAllowlist()).ok);
 });
 
 test("filter: a fence violation spans the fence", () => {

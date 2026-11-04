@@ -99,13 +99,20 @@ export function checkPage(source: string, allow: Allowlist): Verdict {
     }
   }
 
-  // Directives: `${` outside code, brace-balanced like SilverBullet's parser.
+  // Directives: `${` outside code, brace-balanced like SilverBullet's parser. SilverBullet's parser
+  // scans to the end of the text for every `${` that never closes, which is quadratic; the filter
+  // spends at most a few times the page's length on it and refuses the page beyond that.
   let directives = 0;
+  let budget = 64 * source.length + 1_000_000;
   const inCode = (pos: number) => codeRanges.some(([a, b]) => pos >= a && pos < b);
   for (let pos = source.indexOf("${"); pos !== -1; pos = source.indexOf("${", pos + 2)) {
     if (inCode(pos)) continue;
     let depth = 0, len = 0;
     loop: for (; pos + len < source.length; len++) {
+      if (--budget < 0) {
+        violations.push({ rule: "too-complex", detail: "too many unclosed ${ for the filter to check", line: lineOf(pos), from: pos, to: pos + 2 });
+        return { ok: false, violations, directives };
+      }
       switch (source[pos + len]) {
         case "{": depth++; break;
         case "}": depth--; if (depth === 0) break loop; break;
@@ -120,9 +127,9 @@ export function checkPage(source: string, allow: Allowlist): Verdict {
   }
 
   // Baked sections: `<!--#lua EXPR -->` holds an expression that "Baked Sections: Update" re-evaluates
-  // on the whole page, with the rights of the person who runs it. Checked like a directive.
+  // on the whole page, with the rights of the person who runs it. SilverBullet finds the markers with
+  // this regex on the raw text, code blocks and code spans included, so the filter does the same.
   for (const m of source.matchAll(BAKED_OPEN)) {
-    if (inCode(m.index!)) continue;
     directives++;
     const found = checkExpression(m[1], allow);
     for (const v of found) violations.push({ ...v, line: lineOf(m.index!), from: m.index!, to: m.index! + m[0].length });

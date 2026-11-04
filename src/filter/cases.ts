@@ -96,5 +96,6 @@ export const cases: Case[] = [
   // Baked sections: the expression of `<!--#lua EXPR -->` is re-evaluated by a person's command
   { id: "B1", name: "a baked section with code", expect: "reject", page: '<!--#lua space.readPage("CONFIG") -->\n| a |\n<!--/lua-->\n' },
   { id: "B2", name: "a baked section with an allowed query", expect: "accept", page: '<!--#lua query[[from p = index.tag "page" select p.name]] -->\n| name |\n<!--/lua-->\n' },
-  { id: "B3", name: "a baked marker inside a code block is text", expect: "accept", page: "```\n<!--#lua space.readPage(\"CONFIG\") -->\n```\n" },
+  { id: "B3", name: "a baked marker inside a code block is still found by SilverBullet's baker", expect: "reject", page: "```\n<!--#lua space.readPage(\"CONFIG\") -->\n```\n" },
+  { id: "B4", name: "a baked marker inside a code span", expect: "reject", page: "Text `<!--#lua config.get(\"x\") -->` more\n" },
 ];

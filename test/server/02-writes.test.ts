@@ -161,6 +161,21 @@ test("edit-note: a stale revision is rejected; dryRun returns the diff and write
   assert.equal(missing.isError, true, "expectedRevision is required");
 });
 
+test("search: a pattern that backtracks catastrophically is refused after the time limit instead of blocking the server", async () => {
+  const name = track(unique("Projects/Backtrack"));
+  const created = await alice.call("create-note", { filename: name, content: "a".repeat(40) + "b\n" });
+  assert.equal(created.isError, false, created.text);
+  const t0 = performance.now();
+  const r = await alice.call("search-notes", { query: "(a+)+$", maxResults: 5 });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /took more than \d+ ms to match/);
+  assert.ok(performance.now() - t0 < 6000, "the time limit holds");
+  const names = await alice.call("list-notes", { namePattern: "^(P+|Pr)+x$" });
+  assert.equal(names.isError, false, "a pattern that is harmless on short names still works");
+  const literal = await alice.call("search-notes", { query: "(a+)+$", useRegex: false });
+  assert.equal(literal.isError, false, literal.text);
+});
+
 test("create-note: an existing page is not overwritten without overwrite; read-multiple-notes reads by name and pattern", async () => {
   const name = track(unique("Projects/Once"));
   assert.equal((await alice.call("create-note", { filename: name, content: "first" })).isError, false);

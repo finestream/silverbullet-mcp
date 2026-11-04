@@ -20,6 +20,7 @@ import type { State } from "./state.ts";
 import type { Config } from "./config.ts";
 import { NEVER_WRITTEN_TYPES } from "./config.ts";
 import type { Log } from "./log.ts";
+import { matchAll, MatchTimeout, type MatchItem } from "./match.ts";
 
 export type Context = {
   user: Credential;
@@ -93,15 +94,34 @@ export function normalizeName(filename: string): string {
 
 const SPACE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const REGEX_LIMIT = 300;
+/** The largest page the server writes, in characters. */
+const PAGE_LIMIT = 1_000_000;
 
-/** A user-supplied regex: bounded in length, compiled or refused. */
-function compileRegex(pattern: string, flags: string, what: string): RegExp {
+/** A user-supplied regex: bounded in length, compiled (to validate) or refused. */
+function validRegex(pattern: string, flags: string, what: string): { pattern: string; flags: string } {
   if (pattern.length > REGEX_LIMIT) throw new Refusal("input", `${what} is longer than ${REGEX_LIMIT} characters.`);
   try {
-    return new RegExp(pattern, flags);
+    new RegExp(pattern, flags);
   } catch (e) {
     throw new Refusal("input", `${what} is not a valid regex: ${(e as Error).message}`);
   }
+  return { pattern, flags };
+}
+
+/** Matches in a worker with a time limit; a pattern that backtracks catastrophically is refused, not served. */
+async function matched(re: { pattern: string; flags: string }, items: MatchItem[]) {
+  try {
+    return await matchAll(re.pattern, re.flags, items);
+  } catch (e) {
+    if (e instanceof MatchTimeout) throw new Refusal("input", e.message);
+    throw e;
+  }
+}
+
+/** The names of `files` that match a user pattern. */
+async function matchingNames(re: { pattern: string; flags: string }, files: SbFile[]): Promise<Set<string>> {
+  const results = await matched(re, files.map((f) => ({ id: f.name, text: f.name, lines: false })));
+  return new Set(results.filter((r) => r.count > 0).map((r) => r.id));
 }
 
 export function registerTools(server: McpServer, ctx: Context) {
@@ -260,8 +280,8 @@ export function registerTools(server: McpServer, ctx: Context) {
       serving(s);
       let files = await visible(s);
       if (namePattern) {
-        const re = compileRegex(namePattern, "i", "namePattern");
-        files = files.filter((f) => re.test(f.name));
+        const hits = await matchingNames(validRegex(namePattern, "i", "namePattern"), files);
+        files = files.filter((f) => hits.has(f.name));
       }
       files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       const total = files.length;
@@ -332,8 +352,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       if (!filenames && !namePattern) throw new Refusal("input", "Give filenames or a namePattern.");
       const names = new Set<string>((filenames ?? []).map(normalizeName));
       if (namePattern) {
-        const re = compileRegex(namePattern, "i", "namePattern");
-        for (const f of await visible(s)) if (re.test(f.name)) names.add(f.name);
+        for (const name of await matchingNames(validRegex(namePattern, "i", "namePattern"), await visible(s))) names.add(name);
       }
       const notes: Array<Record<string, unknown>> = [];
       for (const file of [...names].slice(0, maxResults)) {
@@ -371,17 +390,16 @@ export function registerTools(server: McpServer, ctx: Context) {
     tool("search-notes", async ({ space: sp, query, useRegex, caseSensitive, searchType, maxResults, page, contextLines, maxMatchesPerNote }) => {
       const s = resolveSpace(sp);
       serving(s);
-      const re = compileRegex(useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "g" : "gi", "query");
+      const re = validRegex(useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "g" : "gi", "query");
       const pages = (await visible(s)).filter((f) => f.name.endsWith(".md"));
       type Match = { type: "title" | "content"; line: number; content: string; matchCount: number; context?: string };
       const hits: Array<{ filename: string; matches: Match[]; score: number }> = [];
       const errors: Array<{ filename: string; message: string }> = [];
+      // Fetch the contents on this thread, match everything in the worker, then build the results.
+      const texts = new Map<string, string>();
+      const items: MatchItem[] = [];
       for (const f of pages) {
-        const matches: Match[] = [];
-        if (searchType !== "content") {
-          const n = [...f.name.matchAll(re)].length;
-          if (n > 0) matches.push({ type: "title", line: 0, content: f.name, matchCount: n });
-        }
+        if (searchType !== "content") items.push({ id: `title\n${f.name}`, text: f.name, lines: false });
         if (searchType !== "title") {
           try {
             let text = cache.content(user.user, s, f.name, f.lastModified);
@@ -389,16 +407,25 @@ export function registerTools(server: McpServer, ctx: Context) {
               text = (await readText(s, f.name)).text;
               cache.setContent(user.user, s, f.name, f.lastModified, text);
             }
-            const lines = text.split("\n");
-            lines.forEach((line, i) => {
-              const n = [...line.matchAll(re)].length;
-              if (n === 0) return;
-              const from = Math.max(0, i - contextLines);
-              const to = Math.min(lines.length - 1, i + contextLines);
-              matches.push({ type: "content", line: i + 1, content: line.trim().slice(0, 2000), matchCount: n, context: contextLines > 0 ? lines.slice(from, to + 1).join("\n").slice(0, 4000) : undefined });
-            });
+            texts.set(f.name, text);
+            items.push({ id: `content\n${f.name}`, text, lines: true });
           } catch (e) {
             errors.push({ filename: f.name, message: (e as Error).message });
+          }
+        }
+      }
+      const found = new Map((await matched(re, items)).map((r) => [r.id, r]));
+      for (const f of pages) {
+        const matches: Match[] = [];
+        const title = found.get(`title\n${f.name}`);
+        if (title && title.count > 0) matches.push({ type: "title", line: 0, content: f.name, matchCount: title.count });
+        const content = found.get(`content\n${f.name}`);
+        if (content && content.lines) {
+          const lines = texts.get(f.name)!.split("\n");
+          for (const [i, n] of content.lines) {
+            const from = Math.max(0, i - contextLines);
+            const to = Math.min(lines.length - 1, i + contextLines);
+            matches.push({ type: "content", line: i + 1, content: lines[i].trim().slice(0, 2000), matchCount: n, context: contextLines > 0 ? lines.slice(from, to + 1).join("\n").slice(0, 4000) : undefined });
           }
         }
         if (matches.length) hits.push({ filename: f.name, matches, score: matches.reduce((a, m) => a + m.matchCount, 0) });
@@ -426,7 +453,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       inputSchema: {
         space,
         filename: z.string().min(1).describe("Page name or file name; `.md` is added when the name has no extension"),
-        content: z.string(),
+        content: z.string().max(PAGE_LIMIT),
         encoding: z.enum(["utf8", "base64"]).default("utf8").describe("base64 for binary files"),
         overwrite: z.boolean().default(false).describe("Replace an existing file; prefer edit-note for pages"),
       },
@@ -494,6 +521,7 @@ export function registerTools(server: McpServer, ctx: Context) {
         throw new Refusal("input", (e as Error).message);
       }
       const changed = prepared.content !== original.text;
+      if (prepared.content.length > PAGE_LIMIT) throw new Refusal("input", `The page would be longer than ${PAGE_LIMIT} characters. Nothing was written.`);
       if (changed) checkContent(file, prepared.content);
       const { diff, truncated } = diffOf(file, original.text, prepared.content);
       let revision: string | null = original.etag;
