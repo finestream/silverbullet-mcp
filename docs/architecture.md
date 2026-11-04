@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposed** (2026-10-30, revised 2026-11-04 with the core server). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The terms *user* (a SilverBullet account), *person*, *agent* and *operator* are those of [security.md](security.md), section 1. The release checks in [`test/`](../test/) re-take the measurements below on every SilverBullet release.
+Status: **proposed** (2026-10-30, revised 2026-11-04 with the core server and the render tools). This document records the architecture of v2 of this server: the decisions, the alternatives rejected and the measurements they rest on. The security model (write filter, allowlist, scan, index-time transform, refuse-to-serve) is in [security.md](security.md), the conventions a guarded space follows in [space-guidelines.md](space-guidelines.md), and the measured behaviour of SilverBullet 2.12.1 in [facts/](facts/). The terms *user* (a SilverBullet account), *person*, *agent* and *operator* are those of [security.md](security.md), section 1. The release checks in [`test/`](../test/) re-take the measurements below on every SilverBullet release.
 
 ## Goal
 
@@ -46,18 +46,19 @@ return markdown.expandMarkdown(space.readPage(name))
 
 It evaluates `${…}` expressions, `query[[…]]`, `template.each`/`template.new` and `![[transclusions]]`. Two gaps in 2.12.1, handled as follows:
 
-* **`_CTX` is not set** inside `expandMarkdown`, so pages that use `_CTX.currentPage` render an error; `editor.navigate` first does not help. The render script sets a global `_CTX = {currentPage = …}` around the call, which means renders on one runtime must be **serialised**. The edge release (SilverBullet's unreleased main-branch build, published under the `edge` image tag) adds an `expandMarkdown(text, {pageName = …})` option that makes the shim unnecessary.
-* **Query results come back as HTML tables** (`<table>…`), not Markdown tables. Readable for a model; converting them is optional.
+* **`_CTX` is not set** inside `expandMarkdown`, so pages that use `_CTX.currentPage` render an error; `editor.navigate` first does not help. The render script sets a global `_CTX = {currentPage = …}` around the call, which means renders on one runtime must be **serialised**. The edge release (SilverBullet's unreleased main-branch build, published under the `edge` image tag) adds an `expandMarkdown(text, {pageName = …})` option that makes the shim unnecessary; the server's script tries that option first and falls back to the shim. Found while building it (2026-11-04): inside a Lua function, an assignment to a bare global name lands in a function-local environment that the page's directives do not see; the shim writes `_G._CTX`.
+* **Query results come back as HTML tables** (`<table>…`), not Markdown tables; a `select` of plain values renders as text. Decided 2026-11-04: `render-note` leaves them as they are. They are SilverBullet's own output, a model reads them, and a conversion would be a second renderer to keep in step with SilverBullet's.
 
 | Measurement | Value |
 |---|---|
-| First call on a new runtime (browser launch + client boot + sync + index) | 1.8–1.9 s |
-| Render of a page, warm | 30–50 ms |
-| Index ready at the first call (queries complete) | yes, for a 5-page space; **to verify on a large space** |
+| First call on a new runtime (browser launch + client boot + sync + index) | 1.8–1.9 s for a 5-page space; **9.2 s for a 1,000-page space** (2026-11-04, same set-up, pages of ~700 bytes with frontmatter, a task and a link each) |
+| Render of a page, warm | 30–50 ms (5 pages); 36–78 ms for a page with three queries over 1,000 pages |
+| Index ready at the first call (queries complete) | **yes**, for the 5-page and the 1,000-page space: at the first call the counts over all pages, over a frontmatter field and over all tasks were complete. The runtime boots, syncs and indexes before it answers its first script |
+| Index of a page written through the API, warm runtime | about 1 s behind the write on the test instance (the index wait of [security.md](security.md), section 12, covers it) |
 
 ### Screenshots
 
-`editor.navigate(name)` through the Lua endpoint, then `GET /<space>/.runtime/screenshot`: 800×600 PNG, 30 KB, 70–110 ms warm. `?selector=%23sb-editor` clips to the editor (800×544). `?fullPage=1` is **ignored in 2.12.1** (same image); it is documented for the edge release, with a ~12000 px limit. Navigate and capture must be one serialised step per runtime.
+`editor.navigate(name)` through the Lua endpoint, then `GET /<space>/.runtime/screenshot`: 800×600 PNG, 30 KB, 70–110 ms warm. `?selector=%23sb-editor` clips to the editor (800×544). `?fullPage=1` is **ignored in 2.12.1** (same image); it is documented for the edge release, with a ~12000 px limit. Navigate and capture must be one serialised step per runtime. `editor.navigate` returns once the page is shown (`editor.getCurrentPage()` is the new page in the same script).
 
 ### Cost of a runtime
 
@@ -158,10 +159,11 @@ Every tool takes `space` (the prefix, `alpha` for `/alpha`); omitted, the user's
 ### 5. Rendering: opt-in tools over the Runtime API
 
 * `render-note` (Markdown) and `screenshot-note` (PNG as MCP image content) are separate tools. They need **`x` in the access list** for the page, and only work where SilverBullet grants that user Write and the Runtime API; a user with read-only access to a space cannot render there. They are refused in a space whose last scan has findings ([security.md](security.md), section 7; the state is `renderBlock(space)` in [`src/state.ts`](../src/state.ts)). `read-note` stays on `/.fs` and never starts Chrome. Both render `.md` pages only.
-* **Rendering is for reading; editing works on the source.** `read-note` returns the raw Markdown as stored, with its `revision`; `render-note` returns the expansion and no `revision`, and `edit-note` requires one, so every edit is based on the source. After a write, a render waits (bounded) until the runtime's index holds the new revision, with a fresh runtime as fallback ([security.md](security.md), section 12).
-* One **queue per `(user, space)`**: renders and screenshots on the same runtime run one at a time (the `_CTX` shim and navigate-then-capture are not concurrent-safe).
+* **Rendering is for reading; editing works on the source.** `read-note` returns the raw Markdown as stored, with its `revision`; `render-note` returns the expansion and no `revision`, and `edit-note` requires one, so every edit is based on the source. After a write through the server, a render in that space waits (bounded, `MCP_INDEX_WAIT`) until the runtime's index holds the written pages, with `system.reboot()` on that runtime as the fallback ([security.md](security.md), section 12).
+* One **queue per `(user, space)`**: renders and screenshots on the same runtime run one at a time (the `_CTX` shim and navigate-then-capture are not concurrent-safe). A global cap bounds the Runtime API calls in flight over all runtimes (`MCP_RENDER_PARALLEL`), and every call has a deadline that covers the queue, the index wait and the runtime's answer (`MCP_RENDER_TIMEOUT`, passed on as the Runtime API's `X-Timeout`). The implementation is [`src/render.ts`](../src/render.ts).
+* **`x` alone allows a render**; `r` is not required for it, as `x` is the right to render. Because the runtime runs with the user's full SilverBullet rights, a render shows transcluded and queried pages whatever the access list says about them (section 3: the list binds the MCP route only); the tool descriptions say so.
 * The render script shadows `space.write*`/`delete*`. It is documented as best-effort (see the finding above): Lua in a page can still write through the runtime's browser with the user's full space rights, past the access list. What makes `x` safe to grant is that pages hold no code: the write filter, the scan and the index-time transform ([security.md](security.md), sections 5, 7 and 10). A page that writes when rendered does the same when opened in the browser and is a defect of that page.
-* **Runtime lifetime**: SilverBullet keeps every runtime until restart, and only a SilverBullet administrator can see or stop runtimes. The server holds no admin token (section 2), so it cannot start, stop or count them; it only knows which `(user, space)` pairs it has used since its own start. The number of runtimes is bounded instead by the pairs the operator allows: `x` somewhere in that space in the access list, and the Runtime API granted by SilverBullet. Each runtime costs about 200 MiB, so granting `x` is the operator's call. Stopping idle runtimes is left to SilverBullet (see *Possible improvements in SilverBullet*), to the operator, or to a periodic restart of SilverBullet. What the server can do on its own runtime is `system.reboot()`, which restarts the client inside it and re-indexes the space; that is the fallback after a write ([security.md](security.md), section 12).
+* **Runtime lifetime**: SilverBullet keeps every runtime until restart, and only a SilverBullet administrator can see or stop runtimes. The server holds no admin token (section 2), so it cannot start, stop or count them; it only knows which `(user, space)` pairs it has used since its own start, which it lists on the report page with their calls and reboots ([security.md](security.md), section 8). The number of runtimes is bounded instead by the pairs the operator allows: `x` somewhere in that space in the access list, and the Runtime API granted by SilverBullet. Each runtime costs about 200 MiB, so granting `x` is the operator's call. Stopping idle runtimes is left to SilverBullet (see *Possible improvements in SilverBullet*), to the operator, or to a periodic restart of SilverBullet. What the server can do on its own runtime is `system.reboot()`, which restarts the client inside it and re-indexes the space; that is the fallback after a write ([security.md](security.md), section 12).
 * When SilverBullet offers `expandMarkdown{pageName}`, `fullPage` screenshots and `/.search`, the server uses them (feature-detected on the instance's version).
 * *Rendering in the MCP server itself* (its own Lua or Markdown engine) was rejected: queries, templates and widgets live in SilverBullet's client, and only the Runtime API runs them as the user.
 
@@ -181,10 +183,10 @@ One container (`node:24-alpine`, non-root, read-only root filesystem; [`Dockerfi
 | `create-note` | `PUT` + `If-None-Match: *` | file-type check, write filter on the result; `overwrite` for a plain `PUT` |
 | `edit-note` | `GET`, then `PUT` + `If-Match` | `expectedRevision` required, `dryRun` returns the diff; write filter on the result |
 | `delete-note` | `DELETE` + `If-Match` | needs `d`; `expectedRevision` optional |
-| `render-note` | `POST /<s>/.runtime/lua_script` | needs `x`; `.md` only; no `revision` |
-| `screenshot-note` | `lua_script` + `GET /<s>/.runtime/screenshot` | needs `x`; `.md` only; `selector` |
+| `render-note` | `GET /<s>/.fs/<path>`, then `POST /<s>/.runtime/lua_script` | needs `x`; `.md` only; no `revision`; refused while the space has scan findings; waits for the index after a write |
+| `screenshot-note` | as above, `lua_script` (navigate) + `GET /<s>/.runtime/screenshot` | needs `x`; `.md` only; `selector`, `fullPage` (passed on; ignored by 2.12.1); PNG as MCP image content |
 
-Every tool resolves the space (the parameter, else the user's default space), checks the refuse-to-serve state of the server and the space ([security.md](security.md), section 9), then the access list: `r` for the read tools, `r` and `w` for `edit-note`, `w` for `create-note`, `d` for `delete-note`; the two write tools also run the file-type check and the write filter ([security.md](security.md), section 5). A refusal says which control refused: the access list (with the effective rights), the write filter (with rule and line), the file-type rule, the refuse-to-serve state, a revision conflict, a malformed name; SilverBullet's own refusals are passed through with their status, without the internal URL. While the server is in its refuse-to-serve state, only `list-spaces` and the health endpoint answer; while a space has scan findings, its render tools answer with the error that names them.
+Every tool resolves the space (the parameter, else the user's default space), checks the refuse-to-serve state of the server and the space ([security.md](security.md), section 9), then the access list: `r` for the read tools, `r` and `w` for `edit-note`, `w` for `create-note`, `d` for `delete-note`, `x` for the two render tools; the two write tools also run the file-type check and the write filter ([security.md](security.md), section 5); the render tools check the render block of the space and read the source through `/.fs` first, so SilverBullet's own `403` or `404` for the page comes back before a browser starts. A refusal says which control refused: the access list (with the effective rights), the write filter (with rule and line), the file-type rule, the refuse-to-serve state, the render block (with the count of findings and the report page), a revision conflict, a malformed name; SilverBullet's own refusals are passed through with their status, without the internal URL, and a `403` from the Runtime API carries the hint that rendering needs Write and the Runtime API granted in the space's access grid. While the server is in its refuse-to-serve state, only `list-spaces` and the health endpoint answer; while a space has scan findings, its render tools answer with the error that names them.
 
 `search-replace-note` from v1 is not carried over: it replaces case-insensitively everywhere without a revision check, and `edit-note` covers its use.
 
@@ -200,8 +202,6 @@ Changes in SilverBullet that would simplify or strengthen this architecture. Eac
 
 ## Open points for later tasks
 
-* Index readiness on a large space at a runtime's first call: measure, and wait for the index if needed (rendering).
-* HTML tables in rendered Markdown: leave as is or convert (rendering).
 * Which OAuth client registration the clients need from the identity provider (dynamic client registration or client ID metadata documents) (phase 2).
 
 ## Test instance
@@ -212,7 +212,8 @@ The measurements were taken on the compose set-up of [`test/`](../test/): Silver
 |---|---|---|---|---|
 | alpha | `/alpha` | write + Runtime API | read | write |
 | beta | `/beta` | — | write + Runtime API | write |
+| gamma | `/gamma` | write + Runtime API | read | write |
 
-`scan` is the server's technical user ([security.md](security.md), section 7). The server's integration tests in [`test/server/`](../test/server/) run against the same instance.
+`scan` is the server's technical user ([security.md](security.md), section 7). `alpha` holds code outside `Library/` on purpose, so the server's scan always has findings there and rendering is blocked; `gamma` is clean and is where the render tools are tested. The server's integration tests in [`test/server/`](../test/server/) run against the same instance.
 
 The Runtime API needs no manual step: `silverbullet setup` writes `runtimeApi: true` to `server.json`, and the bootstrap also sets it through `PUT /.dashboard/api/admin/server-config`. Everything is created through SilverBullet's admin API (the same sequence its own multi-space end-to-end test uses), so CI can run it.

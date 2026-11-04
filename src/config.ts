@@ -26,6 +26,12 @@ export type Config = {
   /** Tool calls per user and minute; 0 means no limit. */
   rateLimit: number;
   logLevel: "debug" | "info";
+  /** Runtime API calls in flight at once, over all runtimes (docs/architecture.md, section 5). */
+  renderParallel: number;
+  /** Milliseconds a render or screenshot call may take in all, queue included. */
+  renderTimeout: number;
+  /** Milliseconds a render waits for the runtime's index to hold a write made through the server, before the reboot fallback (docs/security.md, section 12). */
+  indexWait: number;
 };
 
 export const DEFAULT_FILE_TYPES = [".md"];
@@ -49,6 +55,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     spaces: (env.MCP_SPACES ?? "").split(",").map((s) => s.trim().replace(/^\//, "")).filter(Boolean),
     rateLimit: Number(env.MCP_RATE_LIMIT ?? 120),
     logLevel: env.MCP_LOG_LEVEL === "debug" ? "debug" : "info",
+    renderParallel: Number(env.MCP_RENDER_PARALLEL ?? 4),
+    renderTimeout: parseDuration(env.MCP_RENDER_TIMEOUT ?? "90s"),
+    indexWait: parseDuration(env.MCP_INDEX_WAIT ?? "5s"),
   };
 }
 

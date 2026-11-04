@@ -13,6 +13,7 @@ import { SilverBullet } from "./sb.ts";
 import { State } from "./state.ts";
 import { log } from "./log.ts";
 import { createHttpServer, staticBearerAuth } from "./server.ts";
+import { Renderer } from "./render.ts";
 
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
 
@@ -64,7 +65,9 @@ export function buildApp(config: Config) {
     allowedFiles: () => allowedFiles.value ?? [],
   });
 
-  return { config, state, sb, credentials, accessList, allowlist, allowedFiles, scanner, refresh, files, version };
+  const renderer = new Renderer({ sb, state, config, log });
+
+  return { config, state, sb, credentials, accessList, allowlist, allowedFiles, scanner, renderer, refresh, files, version };
 }
 
 /** Settings weaker than the shipped defaults (docs/security.md, section 11), reported once. */
@@ -91,7 +94,7 @@ function relaxedSettings(config: Config, allow: Allowlist | null, acl: AccessLis
 async function serve(config: Config) {
   const app = buildApp(config);
   const { state } = app;
-  log.info("start", { version, sbUrl: config.sbUrl, port: config.port, scanMode: config.scanMode, scanInterval: config.scanInterval, fileTypes: config.fileTypes });
+  log.info("start", { version, sbUrl: config.sbUrl, port: config.port, scanMode: config.scanMode, scanInterval: config.scanInterval, fileTypes: config.fileTypes, renderParallel: config.renderParallel, renderTimeout: config.renderTimeout, indexWait: config.indexWait });
   for (const r of state.relaxed) log.warn("config.relaxed", { setting: r });
   for (const f of app.files) f.watch();
 
@@ -100,7 +103,7 @@ async function serve(config: Config) {
 
   const server = createHttpServer({
     auth: staticBearerAuth(() => (state.credentials.ok ? app.credentials.value : null)),
-    context: (user) => ({ user, sb: app.sb, acl: app.accessList.value!, allow: app.allowlist.value ?? compileAllowlist([]), config, state, log }),
+    context: (user) => ({ user, sb: app.sb, acl: app.accessList.value!, allow: app.allowlist.value ?? compileAllowlist([]), config, state, log, renderer: app.renderer }),
     state,
     log,
     rateLimit: config.rateLimit,

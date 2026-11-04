@@ -1,9 +1,9 @@
 // Bootstraps a SilverBullet instance in multi-space mode through its admin API:
 // Runtime API on, users alice, bob and scan (the server's technical user),
-// spaces alpha and beta with their grants, one API token per user, and the
-// seed pages. Idempotent: a second run keeps what exists, except CONFIG, which
-// is always rewritten (the checks change it), and beta's index page, which
-// SilverBullet creates with code in it.
+// spaces alpha, beta and gamma with their grants, one API token per user, and
+// the seed pages. Idempotent: a second run keeps what exists, except CONFIG,
+// which is always rewritten (the checks change it), and the index pages that
+// have a seed (SilverBullet creates a stock index page with code in it).
 //
 // Writes test/.state/env with SB_URL and the tokens.
 
@@ -24,6 +24,8 @@ export type BootstrapOptions = {
 const GRANTS: Record<string, Record<string, { role: "read" | "write"; runtimeApi?: boolean }>> = {
   alpha: { alice: { role: "write", runtimeApi: true }, bob: { role: "read" }, scan: { role: "write", runtimeApi: false } },
   beta: { bob: { role: "write", runtimeApi: true }, scan: { role: "write", runtimeApi: false } },
+  // Clean, for the render tests (docs/security.md, section 12): alice renders, bob is a read member.
+  gamma: { alice: { role: "write", runtimeApi: true }, bob: { role: "read" }, scan: { role: "write", runtimeApi: false } },
 };
 
 /** The space a user can certainly read, to validate a stored token. */
@@ -107,10 +109,12 @@ export async function bootstrap(opts: BootstrapOptions = {}) {
       expect(`seeded ${space}/${path}`, r, [200, 201, 204]);
     }
   }
-  expect("CONFIG of alpha", await sb.write(tokens.admin, "alpha", "CONFIG.md", configPage("shipped")), [200, 201, 204]);
-  expect("CONFIG of beta", await sb.write(tokens.admin, "beta", "CONFIG.md", configPage("shipped")), [200, 201, 204]);
-  // SilverBullet's stock index page calls config.get and widgets.*; beta is kept clean for the server's scan.
-  expect("index of beta", await sb.write(tokens.admin, "beta", "index.md", readFileSync(join(seedRoot, "beta", "index.md"))), [200, 201, 204]);
+  for (const space of Object.values(SPACES)) {
+    expect(`CONFIG of ${space}`, await sb.write(tokens.admin, space, "CONFIG.md", configPage("shipped")), [200, 201, 204]);
+    // SilverBullet's stock index page calls config.get and widgets.*; a space with a seeded index is kept clean for the server's scan.
+    const index = join(seedRoot, space, "index.md");
+    if (existsSync(index)) expect(`index of ${space}`, await sb.write(tokens.admin, space, "index.md", readFileSync(index)), [200, 201, 204]);
+  }
 
   const envText = [
     `SB_URL=${url}`,

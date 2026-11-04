@@ -341,5 +341,13 @@ export function renderReport(space: string, s: SpaceState, state: State, config:
     for (const [control, n] of [...state.refusals].sort()) lines.push(`| ${cell(control)} | ${n} |`);
   }
   lines.push("");
+  const runtimes = [...state.runtimes.values()].filter((r) => r.space === space).sort((a, b) => (a.user < b.user ? -1 : 1));
+  lines.push(`## Runtimes used in this space since start (${runtimes.length})`, "");
+  lines.push("Each is a headless browser of about 200 MiB inside the SilverBullet container, started by the first render of that user here and kept by SilverBullet until it restarts or an administrator stops it (Admin, Runtimes). The server cannot stop them.", "");
+  if (runtimes.length) {
+    lines.push("| User | First used | Last used | Calls | Reboots |", "|---|---|---|---|---|");
+    for (const r of runtimes) lines.push(`| \`${r.user}\` | ${r.firstUsed.toISOString()} | ${r.lastUsed.toISOString()} | ${r.calls} | ${r.reboots} |`);
+  } else lines.push("None.");
+  lines.push("");
   return lines.join("\n");
 }

@@ -7,9 +7,10 @@
 # Another release: SB_IMAGE=ghcr.io/silverbulletmd/silverbullet:edge docker compose -f test/compose.yaml up -d --wait
 #
 # Grants (see lib/bootstrap.ts):
-#   space  path    alice                 bob
-#   alpha  /alpha  write + Runtime API   read
-#   beta   /beta   -                     write + Runtime API
+#   space  path    alice                 bob                   scan
+#   alpha  /alpha  write + Runtime API   read                  write
+#   beta   /beta   -                     write + Runtime API   write
+#   gamma  /gamma  write + Runtime API   read                  write
 #   admin is an administrator and is used by the bootstrap and the runtime checks.
 
 name: sbmcp-test

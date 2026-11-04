@@ -1,7 +1,9 @@
 // The tool surface (docs/architecture.md, "Tool surface"), registered per
 // request for the authenticated user. Every tool resolves the space, checks
 // the refuse-to-serve state, then the access list, then calls SilverBullet as
-// that user; writes pass the file-type check and the write filter first.
+// that user; writes pass the file-type check and the write filter first; the
+// render tools need `x`, render pages only, and are refused while the scan
+// has findings in the space (docs/security.md, sections 7 and 12).
 // Tool names and input shapes follow Ahmad-A0/silverbullet-mcp (MIT) so that
 // clients written for v1 keep working.
 
@@ -15,8 +17,9 @@ import { checkPage, describe, isCodePlace } from "./filter/filter.ts";
 import { pageNameOf } from "./access.ts";
 import type { Credential } from "./credentials.ts";
 import { diffOf, prepareEdits } from "./edit.ts";
-import { SbError, SilverBullet, type SbFile } from "./sb.ts";
+import { RuntimeError, SbError, SilverBullet, type SbFile } from "./sb.ts";
 import type { State } from "./state.ts";
+import { RenderTimeout, type Renderer } from "./render.ts";
 import type { Config } from "./config.ts";
 import { NEVER_WRITTEN_TYPES } from "./config.ts";
 import type { Log } from "./log.ts";
@@ -31,10 +34,11 @@ export type Context = {
   state: State;
   log: Log;
   cache: Cache;
+  renderer: Renderer;
 };
 
 /** A refusal by one of the server's own controls; the message says which. */
-export type Control = "access-list" | "write-filter" | "file-type" | "refuse-to-serve" | "revision" | "input";
+export type Control = "access-list" | "write-filter" | "file-type" | "refuse-to-serve" | "render-block" | "revision" | "input";
 
 export class Refusal extends Error {
   readonly control: Control;
@@ -125,7 +129,7 @@ async function matchingNames(re: { pattern: string; flags: string }, files: SbFi
 }
 
 export function registerTools(server: McpServer, ctx: Context) {
-  const { user, sb, acl, allow, config, state, log, cache } = ctx;
+  const { user, sb, acl, allow, config, state, log, cache, renderer } = ctx;
   const token = user.token;
 
   const resolveSpace = (space: string | undefined): string => {
@@ -219,6 +223,14 @@ export function registerTools(server: McpServer, ctx: Context) {
           done(`silverbullet:${e.status}`);
           return failure(`SilverBullet refused: ${e.message}`);
         }
+        if (e instanceof RuntimeError) {
+          done(`runtime:${e.status}`);
+          return failure(e.status === 403 || e.status === 401 ? `SilverBullet refused: ${e.message}` : `Rendering failed: ${e.message}`);
+        }
+        if (e instanceof RenderTimeout) {
+          done("timeout");
+          return failure(e.message);
+        }
         done("error", (e as Error).message);
         return failure(`Error: ${(e as Error).message}`);
       }
@@ -305,7 +317,7 @@ export function registerTools(server: McpServer, ctx: Context) {
     "read-note",
     {
       title: "Read note",
-      description: "Read a file as stored, with its revision for edit-note. Up to 50,000 characters by default; continue with nextOffset.",
+      description: "Read a file as stored (the source), with its revision for edit-note. Cheap: never starts a browser. Up to 50,000 characters by default; continue with nextOffset. For a page with its expressions, queries and transclusions evaluated, see render-note; edits are always based on this source and its revision.",
       annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: {
         space,
@@ -473,6 +485,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       });
       cache.invalidate(user.user, s);
       state.dropFindings(s, pageNameOf(file));
+      if (file.endsWith(".md")) state.recordWrite(s, pageNameOf(file));
       return result({ space: s, filename: file, revision: r.etag, overwrite }, `Created ${s}/${file} (revision ${r.etag})`);
     }),
   );
@@ -534,6 +547,7 @@ export function registerTools(server: McpServer, ctx: Context) {
         revision = w.etag;
         cache.invalidate(user.user, s);
         state.dropFindings(s, pageNameOf(file));
+        if (file.endsWith(".md")) state.recordWrite(s, pageNameOf(file));
       }
       const data = { space: s, filename: file, dryRun, changed, applied: !dryRun && changed, replacements: prepared.counts, previousRevision: original.etag, revision, diff, diffTruncated: truncated };
       return result(data, `${dryRun ? "Preview" : changed ? "Edited" : "Unchanged"}: ${s}/${file}${!dryRun && changed ? ` (revision ${revision})` : ""}\n${diff}${truncated ? "\n[Diff truncated]" : ""}`);
@@ -564,7 +578,70 @@ export function registerTools(server: McpServer, ctx: Context) {
       });
       cache.invalidate(user.user, s);
       state.dropFindings(s, pageNameOf(file), file);
+      if (file.endsWith(".md")) state.recordWrite(s, pageNameOf(file));
       return result({ space: s, filename: file, deleted: true }, `Deleted ${s}/${file}`);
+    }),
+  );
+
+  /** What both render tools check before the runtime is touched: served, a page, `x`, no scan findings in the space, and the page exists. */
+  const renderable = async (sp: string | undefined, filename: string) => {
+    const s = resolveSpace(sp);
+    serving(s);
+    const file = normalizeName(filename);
+    if (!file.toLowerCase().endsWith(".md")) throw new Refusal("file-type", `Refused by the file-type rule: only pages (.md) are rendered; "${file}" is another file type. Use read-note.`);
+    need(s, file, "x");
+    const block = state.renderBlock(s);
+    if (block) throw new Refusal("render-block", block);
+    // The source read first: SilverBullet's own 403/404 for the page come back here, before a browser starts.
+    await sb.read(token, s, file);
+    return { s, file, page: pageNameOf(file) };
+  };
+
+  const RENDER_RULES = "Needs the x right; pages (.md) only; refused while the scan has findings in the space. For reading only: it returns no revision; edits are always based on read-note's source and its revision. The first call starts a headless browser for this user and space inside SilverBullet (about 200 MiB, kept until SilverBullet restarts), later calls are fast. Runs with the user's full SilverBullet rights, so transcluded or queried pages appear whatever the access list says about them.";
+
+  server.registerTool(
+    "render-note",
+    {
+      title: "Render note",
+      description: `Render a page as the user sees it: \${…} expressions, query[[…]] results, templates and ![[transclusions]] evaluated by SilverBullet's Runtime API as this user. Query results come back as HTML tables. ${RENDER_RULES}`,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      inputSchema: {
+        space,
+        filename: z.string().min(1).describe("Page name; `.md` is added when the name has no extension"),
+      },
+    },
+    tool("render-note", async ({ space: sp, filename }) => {
+      const { s, file, page } = await renderable(sp, filename);
+      const r = await renderer.render(user, s, page);
+      const data = { space: s, filename: file, content: r.markdown, totalCharacters: r.markdown.length, warnings: r.warnings, queuedMs: r.queuedMs, indexWaitMs: r.indexWaitMs, rebooted: r.rebooted };
+      return result(data, r.markdown + (r.warnings.length ? `\n\n[Warning: ${r.warnings.join(" ")}]` : ""));
+    }),
+  );
+
+  server.registerTool(
+    "screenshot-note",
+    {
+      title: "Screenshot note",
+      description: `A PNG of a page as SilverBullet shows it in its editor, taken by SilverBullet's Runtime API as this user. selector clips the image to the first matching element (for example #sb-editor); fullPage asks for the whole page where the instance supports it (SilverBullet 2.12.1 ignores it). ${RENDER_RULES}`,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      inputSchema: {
+        space,
+        filename: z.string().min(1).describe("Page name; `.md` is added when the name has no extension"),
+        selector: z.string().min(1).max(300).optional().describe("CSS selector to clip to"),
+        fullPage: z.boolean().default(false),
+      },
+    },
+    tool("screenshot-note", async ({ space: sp, filename, selector, fullPage }) => {
+      const { s, file, page } = await renderable(sp, filename);
+      const r = await renderer.screenshot(user, s, page, { selector, fullPage });
+      const data = { space: s, filename: file, mimeType: "image/png", bytes: r.png.length, width: r.width, height: r.height, selector: selector ?? null, fullPage, warnings: r.warnings, queuedMs: r.queuedMs, indexWaitMs: r.indexWaitMs, rebooted: r.rebooted };
+      return {
+        content: [
+          { type: "text", text: `Screenshot of ${s}/${page}: ${r.width}x${r.height} PNG, ${r.png.length} bytes${selector ? `, clipped to ${selector}` : ""}${r.warnings.length ? `\n[Warning: ${r.warnings.join(" ")}]` : ""}` },
+          { type: "image", data: r.png.toString("base64"), mimeType: "image/png" },
+        ],
+        structuredContent: data,
+      };
     }),
   );
 }

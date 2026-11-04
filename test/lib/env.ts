@@ -1,8 +1,8 @@
 // The instance the checks run against: URL and tokens from test/.state/env
 // (written by the bootstrap) or from the environment (SB_URL, SB_TOKEN_*).
-// The fixtures are fixed: users alice (write + Runtime API on alpha, nothing
-// on beta), bob (read on alpha, write + Runtime API on beta) and scan (write on
-// both, the server's technical user), plus admin.
+// The fixtures are fixed: users alice (write + Runtime API on alpha and gamma,
+// nothing on beta), bob (read on alpha and gamma, write + Runtime API on beta)
+// and scan (write on every space, the server's technical user), plus admin.
 
 import { existsSync, readFileSync } from "node:fs";
 import { client } from "./sb.ts";
@@ -15,7 +15,7 @@ export const DEFAULT_URL = "http://127.0.0.1:3300";
 export const DEFAULT_ADMIN_PASSWORD = "admin-test-password";
 export const DEFAULT_USER_PASSWORD = "user-test-password";
 
-export const SPACES = { alpha: "alpha", beta: "beta" } as const;
+export const SPACES = { alpha: "alpha", beta: "beta", gamma: "gamma" } as const;
 export const USERS = ["alice", "bob"] as const;
 /** The server's technical user (docs/security.md, section 7): a write member of both spaces. */
 export const SCAN_USER = "scan";

@@ -19,7 +19,7 @@ export const BEARERS = { alice: "alice-client-secret", bob: "bob-client-secret",
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
-/** The credentials file of the fixtures: alice (default alpha), bob (default beta), carol (no SilverBullet rights anywhere) and scan. */
+/** The credentials file of the fixtures: alice (default alpha), bob (default beta), carol (alice's token, default beta: no SilverBullet rights there) and scan. */
 export function credentialsFile(opts: { scan?: boolean; groups?: Record<string, string> } = {}): string {
   const g = (u: string, d: string) => opts.groups?.[u] ?? d;
   const lines = [
@@ -126,7 +126,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
   };
 }
 
-export type ToolResult = { text: string; data: Record<string, any> | undefined; isError: boolean };
+export type ToolResult = { text: string; data: Record<string, any> | undefined; isError: boolean; image?: { data: string; mimeType: string } };
 
 export type McpClient = {
   call(tool: string, args?: Record<string, unknown>): Promise<ToolResult>;
@@ -140,8 +140,9 @@ export async function connect(url: string, bearer: string): Promise<McpClient> {
   await client.connect(transport);
   return {
     async call(tool, args = {}) {
-      const r = (await client.callTool({ name: tool, arguments: args })) as { content: Array<{ type: string; text?: string }>; structuredContent?: Record<string, any>; isError?: boolean };
-      return { text: r.content.map((c) => c.text ?? "").join("\n"), data: r.structuredContent, isError: r.isError === true };
+      const r = (await client.callTool({ name: tool, arguments: args })) as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; structuredContent?: Record<string, any>; isError?: boolean };
+      const image = r.content.find((c) => c.type === "image");
+      return { text: r.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n"), data: r.structuredContent, isError: r.isError === true, image: image ? { data: image.data!, mimeType: image.mimeType! } : undefined };
     },
     async tools() {
       return (await client.listTools()).tools.map((t) => t.name);
