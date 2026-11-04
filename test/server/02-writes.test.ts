@@ -6,6 +6,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startServer, connect, BEARERS, DEFAULT_ACCESS_LIST, unique, type RunningServer, type McpClient } from "./harness.ts";
 import { sb, T } from "../lib/env.ts";
+import { SHIPPED_ALLOWLIST } from "../../src/filter/allowlist.ts";
 
 let server: RunningServer;
 let alice: McpClient;
@@ -188,4 +189,36 @@ test("create-note: an existing page is not overwritten without overwrite; read-m
   assert.equal(notes.find((n) => n.filename === `${name}.md`)?.content, "first");
   assert.match(notes.find((n) => n.filename === "CONFIG.md")?.error ?? "", /Denied by the access list/);
   assert.ok(notes.some((n) => n.filename === "Projects/Two.md"));
+});
+
+test("write filter and scan: a reviewed member of a never-allowed namespace (os.date) is refused with the shipped list and accepted with its exact entry; the scan applies the same list", async () => {
+  const name = track(unique("Projects/Today"));
+  const content = 'Today: ${os.date("%Y-%m-%d")}\n';
+  const refused = await alice.call("create-note", { filename: name, content });
+  assert.equal(refused.isError, true, refused.text);
+  assert.match(refused.text, /line 1, denied-name: os\.date \(allowable by an exact allowlist entry; not on this allowlist\)/);
+  assert.equal((await sb.read(T.alice, "alpha", `${name}.md`)).status, 404, "nothing was written");
+
+  const lenient = await startServer({ allowlist: [...SHIPPED_ALLOWLIST, "os.date"] });
+  const alice2 = await connect(lenient.url, BEARERS.alice);
+  try {
+    assert.ok(lenient.logs.some((l) => l.includes("reviewed members of never-allowed namespaces: os.date")), `the relaxed setting is reported once at start:\n${lenient.logs.join("\n")}`);
+    const ok = await alice2.call("create-note", { filename: name, content });
+    assert.equal(ok.isError, false, ok.text);
+    // Only that member: os.time stays refused on this server.
+    const other = await alice2.call("edit-note", { filename: name, expectedRevision: ok.data!.revision, edits: [{ oldText: "Today:", newText: "Now: ${os.time()}" }] });
+    assert.equal(other.isError, true, other.text);
+    assert.match(other.text, /denied-name: os\.time/);
+    // The scan with the lenient list has no finding for the page; with the shipped list it has the same finding as the filter.
+    await lenient.rescan();
+    const clean = (await sb.read(T.admin, "alpha", "MCP Server.md")).text;
+    assert.ok(!clean.includes(name), `no finding for ${name} with os.date allowlisted:\n${clean}`);
+    await server.rescan();
+    const strict = (await sb.read(T.admin, "alpha", "MCP Server.md")).text;
+    const row = strict.split("\n").find((l) => l.includes(name));
+    assert.ok(row && row.includes("`denied-name`") && row.includes("os.date (allowable by an exact allowlist entry; not on this allowlist)"), `a finding for ${name} with the shipped list:\n${strict}`);
+  } finally {
+    await alice2.close();
+    await lenient.stop();
+  }
 });

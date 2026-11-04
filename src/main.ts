@@ -75,7 +75,10 @@ function relaxedSettings(config: Config, allow: Allowlist | null, acl: AccessLis
   const out: string[] = [];
   if (allow) {
     const extra = allow.entries.filter((e) => !SHIPPED_ALLOWLIST.includes(e));
-    if (extra.length) out.push(`allowlist entries beyond the shipped list: ${extra.join(", ")}`);
+    const reviewed = extra.filter((e) => allow.excepts(e.split(".")));
+    const other = extra.filter((e) => !reviewed.includes(e));
+    if (other.length) out.push(`allowlist entries beyond the shipped list: ${other.join(", ")}`);
+    if (reviewed.length) out.push(`allowlist entries naming reviewed members of never-allowed namespaces: ${reviewed.join(", ")}`);
   }
   const extraTypes = config.fileTypes.filter((t) => !DEFAULT_FILE_TYPES.includes(t));
   if (extraTypes.length) out.push(`file types beyond .md: ${extraTypes.join(", ")}`);

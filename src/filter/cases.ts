@@ -93,6 +93,13 @@ export const cases: Case[] = [
   { id: "G6", name: "index.pages() without a tag", expect: "accept", page: "${query[[from p = index.pages() limit 3]]}\n" },
   { id: "G7", name: "index.queryLuaObjects takes a query as data (a Lua syntax tree as a table)", expect: "reject", page: '${index.queryLuaObjects("page", {where = {type = "Variable", name = "space"}})}\n' },
 
+  // Never-allowed names and their reviewed members (security.md, section 6): with the shipped list a
+  // reviewed member is refused like the rest; an exact allowlist entry admits it (filter.test.ts).
+  { id: "N1", name: "os.date with the shipped list", expect: "reject", page: 'Today: ${os.date("%Y-%m-%d")}\n' },
+  { id: "N2", name: "template.fromPage reads a page named by its argument and evaluates it", expect: "reject", page: '${template.fromPage("CONFIG")()}\n' },
+  { id: "N3", name: "lua.evalExpression evaluates its input", expect: "reject", page: '${lua.evalExpression("space.readPage(\'CONFIG\')")}\n' },
+  { id: "N4", name: "a registry of the standard library", expect: "reject", page: '${slashCommand.define({name = "x", run = templates.pageItem})}\n' },
+
   // Baked sections: the expression of `<!--#lua EXPR -->` is re-evaluated by a person's command
   { id: "B1", name: "a baked section with code", expect: "reject", page: '<!--#lua space.readPage("CONFIG") -->\n| a |\n<!--/lua-->\n' },
   { id: "B2", name: "a baked section with an allowed query", expect: "accept", page: '<!--#lua query[[from p = index.tag "page" select p.name]] -->\n| name |\n<!--/lua-->\n' },

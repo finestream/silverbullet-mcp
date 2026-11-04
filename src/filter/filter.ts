@@ -12,7 +12,7 @@
 import { parser as luaParser } from "./vendor/silverbullet/parse-lua.js";
 import { parser as mdParser } from "@lezer/markdown";
 import type { SyntaxNode } from "@lezer/common";
-import { NEVER_ALLOWED, type Allowlist } from "./allowlist.ts";
+import { isNeverAllowed, isReviewedMember, type Allowlist } from "./allowlist.ts";
 
 export type Violation = {
   rule: string;
@@ -34,10 +34,6 @@ const EXECUTABLE_FENCES = new Set(["space-lua", "space-config", "space-style"]);
 
 /** Markdown nodes whose text SilverBullet never parses for directives. */
 const CODE_NODES = new Set(["FencedCode", "CodeBlock", "InlineCode"]);
-
-/** Never-allowed roots: a reference to one of these is refused whatever the allowlist says. */
-const DENIED_ROOTS = new Set(NEVER_ALLOWED.filter((n) => !n.includes(".")));
-const DENIED_PATHS = new Set(NEVER_ALLOWED.filter((n) => n.includes(".")));
 
 /** Query aggregates, evaluated by the query engine itself (docs: Space Lua/Integrated Query/Aggregating). */
 const AGGREGATES = new Set(["count", "sum", "min", "max", "avg", "array_agg"]);
@@ -173,8 +169,11 @@ export function checkExpression(body: string, allow: Allowlist): Reason[] {
     const root = path[0];
     if (root === "_CTX" || scope.bound.has(root)) return true;
     const joined = path.join(".");
-    if (DENIED_ROOTS.has(root) || DENIED_PATHS.has(joined) || [...DENIED_PATHS].some((d) => joined.startsWith(d + "."))) {
-      push("denied-name", joined);
+    if (isNeverAllowed(joined)) {
+      // Never allowed whatever the allowlist says, except a reviewed member the operator named exactly
+      // (`os.date`; docs/security.md, section 6). The refusal says when an exact entry would admit it.
+      if (allow.excepts(path)) return true;
+      push("denied-name", isReviewedMember(joined) ? `${joined} (allowable by an exact allowlist entry; not on this allowlist)` : joined);
       return false;
     }
     if (allow.allows(path)) return true;

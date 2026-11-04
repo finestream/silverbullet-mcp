@@ -2,8 +2,10 @@
 # may call or reference (docs/security.md, section 6). One entry per line:
 # `name`, `name.sub`, `name.*` or `*.method`. Every entry is audited before
 # it is added; the never-allowed names cannot be added, the server refuses to
-# serve on an entry that covers one. This file is the shipped default, which
-# the image carries at /etc/silverbullet-mcp/allowlist.
+# serve on an entry that covers one. The one exception: a reviewed harmless
+# member of a never-allowed namespace, by its exact name (for example
+# `os.date`; the reviewed list is in docs/security.md, section 6). This file
+# is the shipped default, which the image carries at /etc/silverbullet-mcp/allowlist.
 
 query
 template.each

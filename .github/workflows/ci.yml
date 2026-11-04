@@ -27,8 +27,8 @@ jobs:
       - name: Bootstrap the test instance
         run: node test/bootstrap.ts
       - run: npm run test:integration
-      - name: Release checks (parser, filter, access)
-        run: SB_BROWSER=0 node test/run.ts access parser cost
+      - name: Release checks (parser, filter, access, API)
+        run: SB_BROWSER=0 node test/run.ts access parser cost api
       - name: Stop the test instance
         if: always()
         run: docker compose -f test/compose.yaml down -v
