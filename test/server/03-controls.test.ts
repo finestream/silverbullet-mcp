@@ -110,6 +110,31 @@ test("refuse to serve: a space the scan user cannot reach is refused as unguarde
   }
 });
 
+test("the technical user is configurable: MCP_SCAN_USER names the credentials line the scan uses", async () => {
+  // The line is named `guardian`; the server is told so, and beta is guarded.
+  const named = await startServer({ credentials: credentialsFile({ scanUser: "guardian" }), accessList: BETA_ACCESS, env: { MCP_SCAN_USER: "guardian" } });
+  let bob = await connect(named.url, BEARERS.bob);
+  try {
+    const r = await bob.call("read-note", { filename: "Secret" });
+    assert.ok(!r.isError, r.text);
+    assert.match(r.text, /marker-beta-secret/);
+  } finally {
+    await bob.close();
+    await named.stop();
+  }
+  // The same file with the default name: the refusal names the configured user, not `scan`.
+  const unnamed = await startServer({ credentials: credentialsFile({ scanUser: "guardian" }), accessList: BETA_ACCESS });
+  bob = await connect(unnamed.url, BEARERS.bob);
+  try {
+    const r = await bob.call("read-note", { filename: "Secret" });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /the credentials file has no line for the technical user "scan"\)\. Operator: make the technical user "scan" a write member/);
+  } finally {
+    await bob.close();
+    await unnamed.stop();
+  }
+});
+
 test("scan findings: rendering is blocked in the space with findings only; read and write are served; a cleaned page lifts the block", async () => {
   const planted = unique("Planted");
   await sb.write(T.admin, "beta", `${planted}.md`, 'Leak: ${space.readPage("CONFIG")}\n');

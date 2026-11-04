@@ -61,14 +61,17 @@ export class State {
   readonly spacesSeen = new Set<string>();
   scanning = false;
   readonly reportPage: string;
+  /** The technical user of the scan, named in the refusal of an unguarded space. */
+  readonly scanUser: string;
   /** Writes through the server per space, for the index wait of the render tools. */
   readonly pendingWrites = new Map<string, PendingWrite[]>();
   private writeSeq = 0;
   /** The runtimes used since start, keyed `user/space`, for the report page. */
   readonly runtimes = new Map<string, RuntimeInfo>();
 
-  constructor(reportPage: string) {
+  constructor(reportPage: string, scanUser: string) {
     this.reportPage = reportPage;
+    this.scanUser = scanUser;
   }
 
   space(name: string): SpaceState {
@@ -135,7 +138,7 @@ export class State {
     const s = this.spaces.get(space);
     if (!s || !s.guarded) {
       const why = s?.unguardedReason ?? "the server has not seen this space";
-      return `Refusing to serve space "${space}": it is not guarded (${why}). Operator: make the technical user "scan" a write member of the space (docs/security.md, section 7); the server re-checks on the next scan or SIGHUP.`;
+      return `Refusing to serve space "${space}": it is not guarded (${why}). Operator: make the technical user "${this.scanUser}" a write member of the space (docs/security.md, section 7); the server re-checks on the next scan or SIGHUP.`;
     }
     if (s.transform !== "present") {
       return `Refusing to serve space "${space}": the index-time transform is missing from CONFIG or differs from the shipped block. Operator: add the block of docs/security.md, section 10, to CONFIG verbatim and run "Space: Reindex" in every client; the server re-checks on the next scan or SIGHUP.`;

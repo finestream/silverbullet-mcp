@@ -17,6 +17,7 @@ services:
       # MCP_SCAN_MODE: report      # or quarantine (docs/security.md, section 7)
       # MCP_FILE_TYPES: .md        # the shipped default
       # MCP_REPORT_PAGE: MCP Server
+      # MCP_SCAN_USER: scan        # the technical user of the scan (docs/security.md, section 7)
       # MCP_RATE_LIMIT: "120"      # tool calls per user and minute
     secrets:
       - credentials

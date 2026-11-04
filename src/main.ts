@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { loadConfig, validateFileTypes, WatchedFile, DEFAULT_FILE_TYPES, type Config } from "./config.ts";
-import { parseCredentials, sha256hex, SCAN_USER, type Credentials } from "./credentials.ts";
+import { parseCredentials, sha256hex, type Credentials } from "./credentials.ts";
 import { compileAccessList, parseAccessList, type AccessList } from "./access.ts";
 import { compileAllowlist, parseAllowlist, validateAllowlist, SHIPPED_ALLOWLIST, type Allowlist } from "./filter/allowlist.ts";
 import { parseAllowedFiles, Scanner, type AllowedFile } from "./scan.ts";
@@ -22,7 +22,7 @@ export type App = ReturnType<typeof buildApp>;
 /** Loads the configuration files and wires the parts; used by the server and by the CLI modes. */
 export function buildApp(config: Config) {
   log.setLevel(config.logLevel);
-  const state = new State(config.reportPage);
+  const state = new State(config.reportPage, config.scanUser);
   const sb = new SilverBullet(config.sbUrl);
 
   const credentials = new WatchedFile<Credentials>(config.credentialsFile, (t) => {
@@ -59,7 +59,7 @@ export function buildApp(config: Config) {
     state,
     config,
     log,
-    scanToken: () => credentials.value?.users.get(SCAN_USER)?.token ?? null,
+    scanToken: () => credentials.value?.users.get(config.scanUser)?.token ?? null,
     seedSpaces: () => [...new Set([...(credentials.value?.users.values() ?? [])].map((u) => u.defaultSpace).filter((s): s is string => !!s))],
     allowlist: () => (state.allowlist.ok ? allowlist.value : null),
     allowedFiles: () => allowedFiles.value ?? [],
@@ -94,7 +94,7 @@ function relaxedSettings(config: Config, allow: Allowlist | null, acl: AccessLis
 async function serve(config: Config) {
   const app = buildApp(config);
   const { state } = app;
-  log.info("start", { version, sbUrl: config.sbUrl, port: config.port, scanMode: config.scanMode, scanInterval: config.scanInterval, fileTypes: config.fileTypes, renderParallel: config.renderParallel, renderTimeout: config.renderTimeout, indexWait: config.indexWait });
+  log.info("start", { version, sbUrl: config.sbUrl, port: config.port, scanMode: config.scanMode, scanInterval: config.scanInterval, scanUser: config.scanUser, fileTypes: config.fileTypes, renderParallel: config.renderParallel, renderTimeout: config.renderTimeout, indexWait: config.indexWait });
   for (const r of state.relaxed) log.warn("config.relaxed", { setting: r });
   for (const f of app.files) f.watch();
 
