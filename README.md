@@ -27,7 +27,7 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 
 ## Status
 
-**Core server, phase 1a.** The server in `src/` serves the eight tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, and the refusal to serve. Not yet: the rendered pages (`render-note`, `screenshot-note`, phase 1b), the deployment next to a production instance (1c) and OAuth (2). The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
+**Core server and rendering, phases 1a and 1b.** The server in `src/` serves the ten tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, the refusal to serve, and the two render tools over SilverBullet's Runtime API. Not yet: the deployment next to a production instance (1c) and OAuth (2). The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
 
 ## What is here
 
@@ -37,7 +37,7 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 | [`docs/security.md`](docs/security.md) | Security model: threat model, access list, write filter, allowlist, scan, index-time transform, defaults |
 | [`docs/space-guidelines.md`](docs/space-guidelines.md) | Conventions a space follows when this server guards it |
 | [`docs/facts/`](docs/facts) | Measured behaviour of SilverBullet 2.12.1 that the security model rests on |
-| [`src/`](src) | The server: `main.ts` (entry, `--scan`, `--hash`), `server.ts` (HTTP, auth), `tools.ts` (the tools), `filter/` (the write filter on the vendored parser, the allowlist), `access.ts`, `credentials.ts`, `scan.ts`, `edit.ts`; unit tests beside the code |
+| [`src/`](src) | The server: `main.ts` (entry, `--scan`, `--hash`), `server.ts` (HTTP, auth), `tools.ts` (the tools), `filter/` (the write filter on the vendored parser, the allowlist), `access.ts`, `credentials.ts`, `scan.ts`, `render.ts` (the render path over the Runtime API), `edit.ts`; unit tests beside the code |
 | [`config/`](config) | The shipped allowlist and examples of the credentials file, the access list and the allowed-files list |
 | [`test/`](test) | The release checks (a compose test instance, a bootstrap through the admin API, one check per assumption, a report per SilverBullet version) and, in `test/server/`, the server's integration tests against the same instance |
 | [`Dockerfile`](Dockerfile), [`compose.example.yaml`](compose.example.yaml) | The image (`node:24-alpine`, non-root) and how to run it next to SilverBullet with secrets from files |
@@ -78,13 +78,22 @@ Three files and a few variables. The files are re-read when they change; a `SIGH
 | `MCP_SCAN_MODE` | `report` | `report` or `quarantine` ([docs/security.md](docs/security.md), section 7) |
 | `MCP_REPORT_PAGE` | `MCP Server` | The report page, written at the top level of every guarded space ([docs/security.md](docs/security.md), section 8) |
 | `MCP_RATE_LIMIT` | `120` | Tool calls per user and minute; `0` for none |
+| `MCP_RENDER_PARALLEL` | `4` | Runtime API calls in flight at once, over all users and spaces (*Rendering* below) |
+| `MCP_RENDER_TIMEOUT` | `90s` | The most a `render-note` or `screenshot-note` call may take, queue and index wait included |
+| `MCP_INDEX_WAIT` | `5s` | How long a render waits for the runtime's index to hold a page written through the server before it reboots the runtime ([docs/security.md](docs/security.md), section 12) |
 | `MCP_LOG_LEVEL` | `info` | `info` or `debug`; the log is JSON lines on stdout |
 
 A setting weaker than the shipped default is accepted and reported once ([docs/space-guidelines.md](docs/space-guidelines.md), *Defaults and overrides*).
 
 ## Tools
 
-`list-spaces`, `list-notes`, `read-note`, `read-multiple-notes`, `search-notes`, `create-note`, `edit-note`, `delete-note`, with the names and inputs of v1 where they exist, plus a `space` parameter on each (default: the user's default space). `edit-note` needs the `revision` that `read-note` returned and has a `dryRun`. The semantics, the SilverBullet calls and the rights each tool needs are in [docs/architecture.md](docs/architecture.md), *Tool surface*.
+`list-spaces`, `list-notes`, `read-note`, `read-multiple-notes`, `search-notes`, `create-note`, `edit-note`, `delete-note`, `render-note`, `screenshot-note`, with the names and inputs of v1 where they exist, plus a `space` parameter on each (default: the user's default space). `edit-note` needs the `revision` that `read-note` returned and has a `dryRun`. The semantics, the SilverBullet calls and the rights each tool needs are in [docs/architecture.md](docs/architecture.md), *Tool surface*.
+
+## Rendering
+
+`read-note` returns a page's source, as stored, with its `revision`; `render-note` returns the page as the user sees it, with `${…}` expressions, `query[[…]]` results (as HTML tables), templates and transclusions evaluated; `screenshot-note` returns a PNG of the page as SilverBullet's editor shows it. Both render tools go through SilverBullet's Runtime API as the calling user, need the `x` right in the access list, render pages (`.md`) only, return no `revision` (edits are always based on `read-note`), and are refused in a space where the scan has findings. How they work, the queue per `(user, space)`, the wait for the runtime's index after a write and the `system.reboot()` fallback: [docs/architecture.md](docs/architecture.md), section 5, and [docs/security.md](docs/security.md), section 12.
+
+**Costs.** The first render of a user in a space starts a headless Chrome for that `(user, space)` pair inside the SilverBullet container: about **200 MiB**, plus the space's index; the first call takes 2 s on a tiny space and about 9 s on a space of 1,000 pages (the runtime indexes the space before it answers), later calls tens of milliseconds ([docs/architecture.md](docs/architecture.md), *Findings from the spike*). SilverBullet keeps the runtime until it restarts or an administrator stops it (*Admin → Runtimes*); the server cannot start, stop or count runtimes, and lists the pairs it has used on its report page. Grant `x` only where the SilverBullet container's memory allows one runtime per pair that may render. The Runtime API needs Write access and the per-user *Runtime API* grant in SilverBullet; a read-only member cannot render.
 
 ## Tests
 
@@ -93,7 +102,7 @@ npm run lint                                          # eslint and tsc
 npm run test:unit                                     # the edit engine, the write filter, the access list, the credentials file
 docker compose -f test/compose.yaml up -d --wait      # SilverBullet on http://127.0.0.1:3300
 node test/bootstrap.ts                                # users, spaces, tokens, seed pages (idempotent)
-npm run test:integration                              # the server against that instance
+npm run test:integration                              # the server against that instance, rendering included
 node test/run.ts                                      # the release checks, report in test/report/<version>.md
 docker compose -f test/compose.yaml down -v
 ```
