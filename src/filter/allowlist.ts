@@ -8,7 +8,6 @@ export const SHIPPED_ALLOWLIST: readonly string[] = [
   "query",
   "template.each",
   "templates.*",
-  "views.*",
   "string.*",
   // The index functions that read. The ones that write the index or a page, or
   // register a tag, are never allowed (see below).

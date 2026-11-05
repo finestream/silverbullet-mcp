@@ -10,7 +10,6 @@
 query
 template.each
 templates.*
-views.*
 string.*
 
 # The index functions that read; the ones that write or register are never allowed.
