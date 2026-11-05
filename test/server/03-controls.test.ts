@@ -118,6 +118,11 @@ test("the technical user is configurable: MCP_SCAN_USER names the credentials li
     const r = await bob.call("read-note", { filename: "Secret" });
     assert.ok(!r.isError, r.text);
     assert.match(r.text, /marker-beta-secret/);
+    // The report page names the configured user too.
+    const report = await bob.call("read-note", { filename: "MCP Server" });
+    assert.ok(!report.isError, report.text);
+    assert.match(report.text, /Written by the MCP server's scan as the user `guardian` on /);
+    assert.doesNotMatch(report.text, /as the user `scan`/);
   } finally {
     await bob.close();
     await named.stop();

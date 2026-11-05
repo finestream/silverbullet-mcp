@@ -293,7 +293,7 @@ export function renderReport(space: string, s: SpaceState, state: State, config:
   const lines: string[] = [];
   const now = new Date().toISOString();
   lines.push(`# ${config.reportPage}`, "");
-  lines.push(`Written by the MCP server's scan as the user \`scan\` on ${now}; overwritten on every scan. What it means: [docs/security.md](https://github.com/finestream/silverbullet-mcp/blob/main/docs/security.md), sections 7 to 9.`, "");
+  lines.push(`Written by the MCP server's scan as the user \`${config.scanUser}\` on ${now}; overwritten on every scan. What it means: [docs/security.md](https://github.com/finestream/silverbullet-mcp/blob/main/docs/security.md), sections 7 to 9.`, "");
   lines.push("## State", "");
   const refusal = state.refusal(space);
   const block = state.renderBlock(space);
