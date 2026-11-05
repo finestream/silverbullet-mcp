@@ -14,7 +14,7 @@ The goals are stated once, in the [README](../README.md#goals); this document sa
 | Language | **TypeScript** on Node.js 24 LTS, official [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) |
 | Transport | Streamable HTTP, **stateless** (no MCP sessions held by the server) |
 | Auth, phase 1 | **Server-side credential map**: client bearer → user → that user's SilverBullet API token. No passthrough |
-| Auth, phase 2 | OAuth 2.1 **resource server**; an external OIDC provider (for example Keycloak) issues the tokens; the user claim selects the entry in the same map |
+| Auth, phase 2 | OAuth 2.1 **resource server** beside the static bearers; an external OIDC provider (for example Keycloak) issues the tokens; the user claim selects the entry in the same map ([oauth.md](oauth.md)) |
 | Access control | SilverBullet is the ceiling; below it an **access list** per user or group, space and path (`r`, `w`, `d`, `x`, `-`), deny by default, the most specific path wins, applied to every tool |
 | Content | Pages hold no code: a **write filter** with an **allowlist** of the functions a page may call, a **scan** of the space, an **index-time transform** in `CONFIG`, a **refusal to serve** while a control is missing, and **no rendering in a space with findings** ([security.md](security.md)) |
 | Addressing | A **`space` parameter** on every tool (default: the user's default space); a `list-spaces` tool |
@@ -123,7 +123,7 @@ client ── Bearer <client secret> ──▶ MCP server ── Bearer <SilverB
 * *The client holds the real credential*: still holds. A SilverBullet token can do more than the MCP tools (Runtime API with arbitrary Lua, shell and proxy endpoints where enabled).
 * *MCP forbids token passthrough*: still holds. The [MCP security best practices](https://modelcontextprotocol.io/specification/latest/basic/security_best_practices) forbid accepting tokens not issued for the MCP server and forwarding them downstream. Phase 2 needs audience-bound tokens for the MCP server (RFC 8707), which would then be mapped to SilverBullet tokens anyway, so the map is needed in any case.
 
-**Phase 2** replaces the bearer check with OAuth 2.1 token verification (issuer, audience = the MCP server's URL, expiry), publishes `/.well-known/oauth-protected-resource`, and looks the user up by a claim (`preferred_username`) in the same credentials file. The tokens come from an external OIDC provider (for example Keycloak); the MCP server is only a resource server and runs no authorization server of its own. The auth layer is one module with one interface (`authenticate(req) → user | null`, [`src/server.ts`](../src/server.ts)), so phase 2 swaps it without touching the tools. Until phase 2, clients that speak only stdio reach the server through `mcp-remote` (the npm bridge that lets a stdio-only client talk to a remote HTTP MCP server) with a static bearer; clients that require OAuth (for example web connectors) can connect only from phase 2 on.
+**Phase 2** adds OAuth 2.1 token verification beside the bearer check (signature through the issuer's JWKS, issuer, audience = the MCP server's URL, expiry), publishes `/.well-known/oauth-protected-resource`, and looks the user up by a claim (`preferred_username`) in the same credentials file. The tokens come from an external OIDC provider (for example Keycloak); the MCP server is only a resource server and runs no authorization server of its own. The auth layer is one module with one interface (`authenticate(req) → user | reason`, [`src/server.ts`](../src/server.ts)), so phase 2 came without touching the tools: `bearerOrOAuth` tries the static bearer, then the token ([`src/oauth.ts`](../src/oauth.ts)). Static bearers stay for local clients without OAuth; a client that speaks only stdio still reaches the server through `mcp-remote` (the npm bridge that lets a stdio-only client talk to a remote HTTP MCP server) with one. Clients that require OAuth (for example web connectors) connect by URL. What the server verifies, what the identity provider must do, how clients are registered and from where they must reach the server are in [oauth.md](oauth.md).
 
 **No admin token.** The server holds only the users' own SilverBullet tokens and the scan user's. Rejected alternatives:
 
@@ -202,7 +202,7 @@ Changes in SilverBullet that would simplify or strengthen this architecture. Eac
 
 ## Open points for later tasks
 
-* Which OAuth client registration the clients need from the identity provider (dynamic client registration or client ID metadata documents) (phase 2).
+* None open. Which OAuth client registration the clients need from the identity provider is answered in [oauth.md](oauth.md), section 3: the MCP server takes no part in it, so it is the operator's choice; the recommendation is a client registered by hand, with dynamic client registration as the fallback.
 
 ## Test instance
 

@@ -10,7 +10,7 @@ One MCP server for a whole SilverBullet instance that, beyond reading and writin
 2. reaches **every space** of the instance that the agent's user may access (SilverBullet ≥ 2.10 multi-space mode, spaces addressed as `/<space>`);
 3. returns a page **rendered**, as Markdown with `${…}` expressions, queries, templates and transclusions evaluated, and as a **screenshot** (PNG), next to the raw source;
 4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
-5. runs behind a reverse proxy with **secrets from files**, and can later verify **OAuth tokens** instead of static bearers;
+5. runs behind a reverse proxy with **secrets from files**, and verifies **OAuth tokens** of an external identity provider beside static bearers;
 6. **restricts each agent further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
 7. **keeps code out of the pages agents write**, so that a page an agent wrote can be opened and rendered by any person without running anything but audited code;
 8. is **MIT**, with code taken only from MIT, Apache or BSD sources.
@@ -27,13 +27,14 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 
 ## Status
 
-**Core server and rendering, phases 1a and 1b.** The server in `src/` serves the ten tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, the refusal to serve, and the two render tools over SilverBullet's Runtime API. Phase 1c adds the deployment material: the client guide and the acceptance test below. Not yet: OAuth (2). The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
+**Core server and rendering, phases 1a and 1b.** The server in `src/` serves the ten tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, the refusal to serve, and the two render tools over SilverBullet's Runtime API. Phase 1c adds the deployment material: the client guide and the acceptance test below. Phase 2 adds OAuth: the server verifies access tokens of an external identity provider as a resource server ([docs/oauth.md](docs/oauth.md)); built and tested against a test issuer, not yet run against a real identity provider. The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
 
 ## What is here
 
 | Path | What |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | Architecture decision for v2, with the measurements of the Runtime API spike |
+| [`docs/oauth.md`](docs/oauth.md) | OAuth: what the server verifies, what the identity provider must do (with Keycloak), client registration, reachability, connecting a client |
 | [`docs/security.md`](docs/security.md) | Security model: threat model, access list, write filter, allowlist, scan, index-time transform, defaults |
 | [`docs/space-guidelines.md`](docs/space-guidelines.md) | Conventions a space follows when this server guards it |
 | [`docs/facts/`](docs/facts) | Measured behaviour of SilverBullet 2.12.1 that the security model rests on |
@@ -53,7 +54,7 @@ npm install
 MCP_CREDENTIALS_FILE=./secrets/credentials MCP_CONFIG_DIR=./config SB_URL=http://127.0.0.1:3000 node src/main.ts
 ```
 
-The server listens on `PORT` (default 4000): `POST /mcp` is the MCP endpoint (streamable HTTP, stateless, bearer in the `Authorization` header), `GET /healthz` the health check. Clients that speak only stdio reach it through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) with the bearer as a header. The image does the same: see [compose.example.yaml](compose.example.yaml).
+The server listens on `PORT` (default 4000): `POST /mcp` is the MCP endpoint (streamable HTTP, stateless, bearer in the `Authorization` header), `GET /healthz` the health check, and, with OAuth configured, `GET /.well-known/oauth-protected-resource` its metadata. Clients that speak only stdio reach it through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) with the bearer as a header. The image does the same: see [compose.example.yaml](compose.example.yaml).
 
 Two more modes: `node src/main.ts --scan` runs one scan over the guarded spaces and exits with 1 on findings (the installation step of [docs/security.md](docs/security.md), section 7); `printf '%s' "$SECRET" | node src/main.ts --hash` prints the SHA-256 of a client secret for the credentials file.
 
@@ -80,6 +81,14 @@ A client that speaks only stdio, such as the Claude desktop app, reaches it thro
 ```
 
 One bearer per client (`printf '%s' "$BEARER" | node src/main.ts --hash` gives the hash for the credentials file); a scheduled or unattended run uses the connector of the app it runs in, with that connector's bearer. A client never holds a SilverBullet API token.
+
+**With OAuth** (`MCP_OAUTH_ISSUER` and `MCP_OAUTH_RESOURCE` set) a client connects by URL and the user logs in at the identity provider; no bearer is handed around and no `mcp-remote` is needed:
+
+```sh
+claude mcp add --scope user --transport http notes https://mcp.example.org/mcp --client-id <client id> --callback-port 8765   # Claude Code; then /mcp, Authenticate
+```
+
+In Claude on the web, desktop and mobile: *Settings → Connectors → Add custom connector*, with the server's URL. Which client ID to enter, which redirect URIs the identity provider must allow, and from where each client must reach the server are in [docs/oauth.md](docs/oauth.md), sections 3 to 5. Static bearers keep working beside it.
 
 ## Acceptance test
 
@@ -120,6 +129,8 @@ Three files and a few variables. The files are re-read when they change; a `SIGH
 | `MCP_RENDER_TIMEOUT` | `90s` | The most a `render-note` or `screenshot-note` call may take, queue and index wait included |
 | `MCP_INDEX_WAIT` | `5s` | How long a render waits for the runtime's index to hold a page written through the server before it reboots the runtime ([docs/security.md](docs/security.md), section 12) |
 | `MCP_LOG_LEVEL` | `info` | `info` or `debug`; the log is JSON lines on stdout |
+| `MCP_OAUTH_ISSUER`, `MCP_OAUTH_RESOURCE` | none | Both set: the server verifies OAuth access tokens of that issuer for that resource URL, beside static bearers ([docs/oauth.md](docs/oauth.md)) |
+| `MCP_OAUTH_JWKS_URL`, `MCP_OAUTH_USER_CLAIM`, `MCP_OAUTH_SCOPES` | from the issuer; `preferred_username`; none | Where the issuer's keys are, which claim names the user, which scopes a token must carry |
 
 A setting weaker than the shipped default is accepted and reported once ([docs/space-guidelines.md](docs/space-guidelines.md), *Defaults and overrides*).
 
