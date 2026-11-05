@@ -51,12 +51,129 @@ const TAG_ARGUMENT: Record<string, number> = {
 const BAKED_OPEN = /<!--#lua\s+([\s\S]*?)-->/g;
 const SCRIPT_TAGS = new Set(["space-lua", "space-style"]);
 
+/**
+ * What the filter needs to judge a transclusion (docs/security.md, section 5): the page being
+ * checked, for targets relative to it, and who may not see a target. Without it transclusions
+ * are not checked.
+ */
+export type TransclusionCheck = {
+  /** The name of the page being checked, without `.md`. */
+  page: string;
+  /** Why the page or file `target` may not be transcluded here, or null when it may. */
+  denied(target: string): string | null;
+};
+
+/** The rule of a transclusion whose target its reader may not read: not code, so the refusals word it apart. */
+export const TRANSCLUSION_RULE = "transclusion-denied";
+
+/** A transclusion as it stands in the page: `![[target]]`, or the image form `![alt](path)`, which transcludes a page too. */
+export type Transclusion = { from: number; to: number; raw: string; image: boolean };
+
+/**
+ * Finds `![[…]]` (no `]` inside) and `![…](…)` in one pass. Linear in the page's length whatever
+ * the page holds: the position of the next `]` and `)` is looked up once and kept while it is
+ * still ahead, and the scan goes on after a match, so a page of unclosed `![[` costs one scan,
+ * not one per opener. Of several `![[` before one `]]` the first and the last are both reported:
+ * which of them SilverBullet takes is not something the filter should have to know.
+ */
+export function findTransclusions(source: string): Transclusion[] {
+  const out: Transclusion[] = [];
+  const ahead = (char: string) => {
+    let known = -2; // -1: none from here to the end
+    return (from: number) => {
+      if (known === -1) return -1;
+      if (known < from) known = source.indexOf(char, from);
+      return known;
+    };
+  };
+  const nextBracket = ahead("]");
+  const nextParen = ahead(")");
+  let pos = source.indexOf("![");
+  while (pos !== -1) {
+    let next = pos + 2;
+    const close = nextBracket(pos + 2);
+    if (close === -1) break;
+    if (source[pos + 2] === "[") {
+      if (source[close + 1] === "]") {
+        out.push({ from: pos, to: close + 2, raw: source.slice(pos + 3, close), image: false });
+        const inner = source.lastIndexOf("![[", close);
+        if (inner > pos) out.push({ from: inner, to: close + 2, raw: source.slice(inner + 3, close), image: false });
+        next = close + 2;
+      }
+    } else if (source[close + 1] === "(") {
+      const end = nextParen(close + 2);
+      if (end !== -1) {
+        // `(<a path> "title")` keeps its spaces; `(path "title")` ends at the first one.
+        const inner = source.slice(close + 2, end).trim();
+        const path = inner.startsWith("<") ? inner.slice(1).split(">")[0] : inner.split(/\s/)[0];
+        if (path) out.push({ from: pos, to: end + 1, raw: path, image: true });
+      }
+    }
+    pos = source.indexOf("![", next);
+  }
+  return out;
+}
+
+/** Bounds on one target: the length of a name, and how many of its `#`, `@` and `$` are read as the start of a suffix. */
+const MAX_TARGET = 1024;
+const MAX_READINGS = 32;
+/** A URL with a scheme, or a protocol-relative one: not a file of the space. */
+const EXTERNAL = /^([A-Za-z][A-Za-z0-9+.-]*:|\/\/)/;
+
+/**
+ * The pages or files a transclusion may resolve to, as names the access list is matched against.
+ * SilverBullet 2.12.1 (measured, docs/security.md, section 5) takes `Page`, `/Page`, `^Page` and
+ * `Page.md`, and cuts a heading (`#`), a position (`@`) or an anchor (`$`); the image form also
+ * resolves `..` against the page's folder. Where a character could be part of the name or start
+ * a suffix, both readings are returned, and the caller requires every one of them to be readable.
+ */
+export function transclusionTargets(raw: string, page: string, image: boolean): string[] {
+  const out = new Set<string>();
+  const add = (name: string) => {
+    // No file has a name this long; what the filter cannot read as a name is refused as one.
+    if (name.length > MAX_TARGET) name = name.slice(0, MAX_TARGET);
+    // The shortest reading first: it is the one SilverBullet takes unless the character is part of the name.
+    const cuts: number[] = [];
+    for (let i = 0; i < name.length && cuts.length < MAX_READINGS; i++) if (name[i] === "#" || name[i] === "@" || name[i] === "$") cuts.push(i);
+    if (!name.startsWith("#")) cuts.push(name.length); // `#Heading` alone is the page itself
+    for (const cut of cuts) {
+      const candidate = name.slice(0, cut).replace(/\.md$/, "");
+      if (candidate && candidate !== page) out.add(candidate);
+    }
+  };
+  if (!image) {
+    const name = raw.split("|")[0].replace(/^\^/, "").replace(/^\/+/, "");
+    add(name);
+    if (name.trim() !== name) add(name.trim());
+    return [...out];
+  }
+  if (EXTERNAL.test(raw)) return [];
+  const readings = new Set([raw]);
+  try {
+    readings.add(decodeURIComponent(raw));
+  } catch {}
+  const folder = page.includes("/") ? page.slice(0, page.lastIndexOf("/")).split("/") : [];
+  for (const reading of readings) {
+    const absolute = reading.startsWith("/");
+    for (const base of absolute ? [[]] : [[], folder]) {
+      const segments = [...base];
+      for (const segment of reading.split("/")) {
+        if (segment === "" || segment === ".") continue;
+        if (segment === "..") segments.pop();
+        else segments.push(segment);
+      }
+      add(segments.join("/"));
+    }
+  }
+  return [...out];
+}
+
 /** Pages the filter does not apply to: where code belongs (docs/security.md, section 2). */
 export function isCodePlace(page: string): boolean {
   return page === "CONFIG" || page === "CONFIG.md" || page.startsWith("Library/");
 }
 
-export function checkPage(source: string, allow: Allowlist): Verdict {
+export function checkPage(source: string, allow: Allowlist, transclusion?: TransclusionCheck): Verdict {
   const violations: Violation[] = [];
   const lineOf = lineIndex(source);
   const tree = mdParser.parse(source);
@@ -129,6 +246,20 @@ export function checkPage(source: string, allow: Allowlist): Verdict {
     directives++;
     const found = checkExpression(m[1], allow);
     for (const v of found) violations.push({ ...v, line: lineOf(m.index!), from: m.index!, to: m.index! + m[0].length });
+  }
+
+  // Transclusions: SilverBullet expands them wherever they stand outside code, HTML blocks, HTML
+  // comments and the frontmatter included, so they are found on the raw text like the baked markers.
+  if (transclusion) {
+    for (const t of findTransclusions(source)) {
+      if (inCode(t.from)) continue;
+      for (const target of transclusionTargets(t.raw, transclusion.page, t.image)) {
+        const why = transclusion.denied(target);
+        if (!why) continue;
+        violations.push({ rule: TRANSCLUSION_RULE, detail: `${source.slice(t.from, Math.min(t.to, t.from + 60))}: ${why}`, line: lineOf(t.from), from: t.from, to: t.to });
+        break; // one reason per transclusion
+      }
+    }
   }
 
   return { ok: violations.length === 0, violations, directives };

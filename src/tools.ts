@@ -10,10 +10,10 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AccessList, Right } from "./access.ts";
-import { rightsText } from "./access.ts";
+import type { AccessList, Right, Subject } from "./access.ts";
+import { renderersWithoutRead, rightsText } from "./access.ts";
 import type { Allowlist } from "./filter/allowlist.ts";
-import { checkPage, describe, isCodePlace } from "./filter/filter.ts";
+import { checkPage, describe, isCodePlace, TRANSCLUSION_RULE } from "./filter/filter.ts";
 import { pageNameOf } from "./access.ts";
 import type { Credential } from "./credentials.ts";
 import { diffOf, prepareEdits } from "./edit.ts";
@@ -29,6 +29,8 @@ export type Context = {
   user: Credential;
   sb: SilverBullet;
   acl: AccessList;
+  /** Every user of the credentials file, for the transclusion rule of the write filter. */
+  subjects: readonly Subject[];
   allow: Allowlist;
   config: Config;
   state: State;
@@ -129,7 +131,7 @@ async function matchingNames(re: { pattern: string; flags: string }, files: SbFi
 }
 
 export function registerTools(server: McpServer, ctx: Context) {
-  const { user, sb, acl, allow, config, state, log, cache, renderer } = ctx;
+  const { user, sb, acl, subjects, allow, config, state, log, cache, renderer } = ctx;
   const token = user.token;
 
   const resolveSpace = (space: string | undefined): string => {
@@ -182,14 +184,32 @@ export function registerTools(server: McpServer, ctx: Context) {
     }
   };
 
-  /** The write filter on the page that would result (docs/security.md, section 5). */
-  const checkContent = (file: string, content: string) => {
+  /**
+   * The write filter on the page that would result (docs/security.md, section 5): no code, and no
+   * transclusion of a page that the writer, or a user who may render this page, may not read.
+   */
+  const checkContent = (space: string, file: string, content: string) => {
     if (!file.toLowerCase().endsWith(".md") || isCodePlace(pageNameOf(file))) return;
-    const verdict = checkPage(content, allow);
-    if (!verdict.ok) {
-      const reasons = verdict.violations.map(describe).join("; ");
-      throw new Refusal("write-filter", `Refused by the write filter: the page would hold code (${reasons}). Nothing was written. Pages outside CONFIG and Library/ are data: no code fences, no function definitions or assignments, calls only to allowed functions (docs/security.md, section 5).`);
-    }
+    const page = pageNameOf(file);
+    const verdict = checkPage(content, allow, {
+      page,
+      denied(target) {
+        if (!rightsOn(space, target).has("r")) return `user "${user.user}" has no "r" on ${space}/${target}`;
+        // Other users are not named to the writer; the report page names them to the operator.
+        if (renderersWithoutRead(acl, subjects, space, page, target).length) return `a user who may render this page ("x") has no "r" on ${space}/${target}`;
+        return null;
+      },
+    });
+    if (verdict.ok) return;
+    const code = verdict.violations.filter((v) => v.rule !== TRANSCLUSION_RULE);
+    const transclusions = verdict.violations.filter((v) => v.rule === TRANSCLUSION_RULE);
+    const parts: string[] = [];
+    if (code.length) parts.push(`the page would hold code (${code.map(describe).join("; ")})`);
+    if (transclusions.length) parts.push(`the page would transclude what its reader may not read (${transclusions.map(describe).join("; ")})`);
+    const rules: string[] = [];
+    if (code.length) rules.push("no code fences, no function definitions or assignments, calls only to allowed functions");
+    if (transclusions.length) rules.push("no transclusion of a page or file that the writer, or a user who may render the page, may not read");
+    throw new Refusal("write-filter", `Refused by the write filter: ${parts.join("; and ")}. Nothing was written. Pages outside CONFIG and Library/ are data: ${rules.join("; ")} (docs/security.md, section 5).`);
   };
 
   const readText = async (space: string, file: string) => {
@@ -460,7 +480,7 @@ export function registerTools(server: McpServer, ctx: Context) {
     "create-note",
     {
       title: "Create note",
-      description: "Create a page (or, where allowed, another file). Pages outside CONFIG and Library/ must hold no code: the write filter refuses them otherwise.",
+      description: "Create a page (or, where allowed, another file). Pages outside CONFIG and Library/ must hold no code and transclude nothing their reader may not read: the write filter refuses them otherwise.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         space,
@@ -478,7 +498,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       need(s, file, "w");
       checkFileType(file);
       const body = encoding === "base64" ? Buffer.from(content, "base64") : content;
-      if (typeof body === "string") checkContent(file, body);
+      if (typeof body === "string") checkContent(s, file, body);
       const r = await sb.write(token, s, file, body, overwrite ? {} : { ifNoneMatch: "*" }).catch((e) => {
         if (e instanceof SbError && e.status === 412 && !overwrite) throw new Refusal("revision", `${file} already exists in ${s}. Use edit-note, or overwrite=true.`);
         throw e;
@@ -535,7 +555,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       }
       const changed = prepared.content !== original.text;
       if (prepared.content.length > PAGE_LIMIT) throw new Refusal("input", `The page would be longer than ${PAGE_LIMIT} characters. Nothing was written.`);
-      if (changed) checkContent(file, prepared.content);
+      if (changed) checkContent(s, file, prepared.content);
       const { diff, truncated } = diffOf(file, original.text, prepared.content);
       let revision: string | null = original.etag;
       if (!dryRun && changed) {

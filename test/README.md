@@ -42,6 +42,7 @@ Any Docker with Compose works; give the daemon or VM about 4 GB, since the conta
 | `checks/06-cost.test.ts` | The filter's time per 50 KB page |
 | `checks/07-browser.test.ts` | A fresh browser client (service worker, IndexedDB) boots with the transform active; an API write is indexed with its script replaced and a reload loads nothing |
 | `checks/08-api.test.ts` | The never-allowed names and their reviewed members (`src/filter/allowlist.ts`): every reviewed member exists and behaves as reviewed (`os.date` formats the clock, `schema.*` return plain tables, `markdown.parseMarkdown` does not evaluate, …); every global of the release's Lua environment is classified, so a new API is noticed |
+| `checks/09-transclusion.test.ts` | The forms of a transclusion SilverBullet expands (`![[…]]` with heading, position, alias, `/`, `^`, `.md`; the image form; inside HTML blocks and comments), each refused by the write filter for a reader without `r` on the target; the forms it leaves alone; an expression that returns a transclusion is not expanded by the Runtime API |
 
 Names that start with `[watch]` assert a limitation the design works around (`_CTX` unset, HTML tables, the `fetch` bypass, `fullPage` ignored, the `{}` defect, …). When such a check fails the report says *changed*: the release removed the limitation, and the workaround and the document that describes it need a look.
 

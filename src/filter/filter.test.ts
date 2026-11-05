@@ -1,18 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkPage } from "./filter.ts";
-import { cases } from "./cases.ts";
+import { checkPage, findTransclusions, transclusionTargets } from "./filter.ts";
+import { cases, matrixReader } from "./cases.ts";
 import { readFileSync } from "node:fs";
 import { compileAllowlist, isNeverAllowed, NEVER_ALLOWED, parseAllowlist, REVIEWED_MEMBERS, SHIPPED_ALLOWLIST, shippedAllowlist, validateAllowlist } from "./allowlist.ts";
 
 test("filter: every case of the matrix gets the verdict the security model asks for, with the shipped allowlist", () => {
   const allow = shippedAllowlist();
   const wrong = cases
-    .map((c) => ({ ...c, verdict: checkPage(c.page, allow).ok ? "accept" : "reject" }))
+    .map((c) => ({ ...c, verdict: checkPage(c.page, allow, matrixReader).ok ? "accept" : "reject" }))
     .filter((c) => c.verdict !== c.expect)
     .map((c) => `${c.id} ${c.name}: expected ${c.expect}, got ${c.verdict}`);
   assert.deepEqual(wrong, []);
-  assert.equal(cases.length, 73);
+  assert.equal(cases.length, 99);
 });
 
 test("filter: a violation names the rule, the line and the range of the directive", () => {
@@ -130,4 +130,43 @@ test("allowlist: the reviewed members all lie under a never-allowed name, none i
   }
   assert.deepEqual(SHIPPED_ALLOWLIST.filter((e) => REVIEWED_MEMBERS.includes(e)), [], "the shipped list adds no reviewed member by itself");
   assert.deepEqual(validateAllowlist(REVIEWED_MEMBERS), []);
+});
+
+test("filter: a transclusion violation names the rule, the line, the transclusion and the reason; without a reader transclusions are not checked", () => {
+  const page = "# Title\n\nSee below.\n\n![[Private/Plan#Budget|the budget]] and more\n";
+  const v = checkPage(page, shippedAllowlist(), matrixReader);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.violations.map((x) => `${x.line} ${x.rule}: ${x.detail}`), ["5 transclusion-denied: ![[Private/Plan#Budget|the budget]]: no r on Private/Plan"]);
+  assert.equal(page.slice(v.violations[0].from, v.violations[0].to), "![[Private/Plan#Budget|the budget]]");
+  assert.ok(checkPage(page, shippedAllowlist()).ok);
+});
+
+test("filter: the targets of a transclusion are every page it may resolve to", () => {
+  const targets = (raw: string, image = false) => transclusionTargets(raw, "Notes/Matrix", image).sort();
+  assert.deepEqual(targets("CONFIG"), ["CONFIG"]);
+  assert.deepEqual(targets("/CONFIG.md"), ["CONFIG"]);
+  assert.deepEqual(targets("^CONFIG|alias"), ["CONFIG"]);
+  assert.deepEqual(targets("Private/Plan#Budget"), ["Private/Plan", "Private/Plan#Budget"]);
+  // `@` may be part of a page name or start a position: both readings
+  assert.deepEqual(targets("People/@ann@12"), ["People/", "People/@ann", "People/@ann@12"]);
+  assert.deepEqual(targets("#Intro"), []);
+  assert.deepEqual(targets("Notes/Matrix#Intro"), ["Notes/Matrix#Intro"]);
+  assert.deepEqual(targets("../Private/Plan.md", true), ["Private/Plan"]);
+  assert.deepEqual(targets("Plan", true), ["Notes/Plan", "Plan"]);
+  assert.deepEqual(targets("/Private%2FPlan", true), ["Private%2FPlan", "Private/Plan"]);
+  assert.deepEqual(targets("https://example.org/x.png", true), []);
+  assert.deepEqual(targets("data:image/png;base64,AAAA", true), []);
+});
+
+test("filter: transclusions are found in time linear in the page, whatever unclosed openers it holds", () => {
+  for (const piece of ["![[", "![a](", "![", "![[a]", "![[#", "![[a]] ", "![[a|", "![a]"]) {
+    const page = piece.repeat(200_000) + "\n![[CONFIG]]\n";
+    const t0 = performance.now();
+    const found = findTransclusions(page);
+    assert.ok(performance.now() - t0 < 1000, `${JSON.stringify(piece)}: ${Math.round(performance.now() - t0)} ms`);
+    assert.equal(found[found.length - 1].raw, "CONFIG", `${JSON.stringify(piece)}: the transclusion at the end is still found`);
+  }
+  // Several openers before one close: the first and the last are both reported.
+  assert.deepEqual(findTransclusions("![[a ![[b ![[CONFIG]]").map((t) => t.raw), ["a ![[b ![[CONFIG", "CONFIG"]);
+  assert.deepEqual(findTransclusions("![x](/a) ![[b|c]] ![y](<d e> \"t\")").map((t) => `${t.image ? "image" : "wiki"} ${t.raw}`), ["image /a", "wiki b|c", "image d e"]);
 });
