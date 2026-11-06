@@ -12,8 +12,9 @@ import { parseAllowedFiles, Scanner, type AllowedFile } from "./scan.ts";
 import { SilverBullet } from "./sb.ts";
 import { State } from "./state.ts";
 import { log } from "./log.ts";
-import { bearerOrOAuth, createHttpServer, staticBearerAuth } from "./server.ts";
+import { accessOr, bearerOrOAuth, createHttpServer, staticBearerAuth } from "./server.ts";
 import { OAuthVerifier } from "./oauth.ts";
+import { CfAccessVerifier } from "./cf-access.ts";
 import { Renderer } from "./render.ts";
 
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
@@ -114,9 +115,13 @@ async function serve(config: Config) {
   const credentials = () => (state.credentials.ok ? app.credentials.value : null);
   const oauth = config.oauth ? new OAuthVerifier(config.oauth) : null;
   if (oauth) log.info("oauth", { issuer: oauth.config.issuer, resource: oauth.config.resource, userClaim: oauth.config.userClaim, scopes: oauth.config.scopes, metadata: oauth.metadataUrl() });
+  const cfAccess = config.cfAccess ? new CfAccessVerifier(config.cfAccess) : null;
+  if (cfAccess) log.info("cf-access", { teamDomain: cfAccess.config.issuer, aud: cfAccess.config.audience, certs: cfAccess.certsUrl() });
+  const bearers = oauth ? bearerOrOAuth(credentials, oauth, config.scanUser) : staticBearerAuth(credentials);
   const server = createHttpServer({
-    auth: oauth ? bearerOrOAuth(credentials, oauth, config.scanUser) : staticBearerAuth(credentials),
+    auth: cfAccess ? accessOr(credentials, cfAccess, config.scanUser, bearers, log) : bearers,
     oauth,
+    cfAccess: cfAccess !== null,
     context: (user) => ({ user, sb: app.sb, acl: app.accessList.value!, subjects: subjectsOf(app.credentials.value), allow: app.allowlist.value ?? compileAllowlist([]), config, state, log, renderer: app.renderer }),
     state,
     log,

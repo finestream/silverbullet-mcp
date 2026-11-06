@@ -4,6 +4,8 @@ Status: **built and tested against a test issuer** (2026-11-06). Not yet run aga
 
 The server can verify OAuth 2.1 access tokens beside the static bearers of phase 1 ([architecture.md](architecture.md), section 2). It is a **resource server only**: an external authorization server (an OpenID Connect provider such as Keycloak) logs the user in and issues the token, the MCP server checks it and looks the user up in its credentials file. It runs no authorization server, stores no token and forwards none.
 
+Where the identity provider should not be reachable from the internet, a hosted client can come in through Cloudflare Access instead, which is then the authorization server: [cloudflare-access.md](cloudflare-access.md). Both ways work beside each other.
+
 ```
 client ── authorization code + PKCE ──▶ authorization server (issuer)
 client ── Bearer <access token> ──▶ MCP server ── Bearer <that user's SilverBullet API token> ──▶ SilverBullet
@@ -82,7 +84,7 @@ What the clients need, from [Claude's connector documentation](https://claude.co
 
 * **A client on the user's own machine** (Claude Code) connects from that machine, and its browser does the login. If the machine reaches the MCP server and the issuer, for example over a private network, nothing needs to be public.
 * **A hosted client** (a custom connector of Claude on the web, desktop or mobile) connects from its vendor's network: the vendor's servers call the MCP server and fetch the issuer's metadata and token endpoint. Both must then be reachable from there. Claude's documentation names the range its requests come from; an operator can admit that range alone.
-* **Only the MCP server and the issuer's OAuth endpoints** need to be reachable, never SilverBullet. The MCP server needs `/mcp`, `/.well-known/oauth-protected-resource` and nothing else from outside; `/healthz` can stay inside.
+* **Only the MCP server and the issuer's OAuth endpoints** need to be reachable, never SilverBullet. With Cloudflare Access in front ([cloudflare-access.md](cloudflare-access.md)), not even the issuer: hosted clients log in at Access, and the issuer serves the clients on the operator's own network. The MCP server needs `/mcp`, `/.well-known/oauth-protected-resource` and nothing else from outside; `/healthz` can stay inside.
 * Once the server is reachable from outside, **the token is the only thing between the internet and the tools**. Keep the access list as narrow as before, keep the rate limits, and watch `auth.refused` in the log.
 
 ## 5. Connecting a client

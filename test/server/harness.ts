@@ -20,14 +20,16 @@ export const BEARERS = { alice: "alice-client-secret", bob: "bob-client-secret",
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 /** The credentials file of the fixtures: alice (default alpha), bob (default beta), carol (alice's token, default beta: no SilverBullet rights there) and scan. */
-export function credentialsFile(opts: { scan?: boolean; scanUser?: string; groups?: Record<string, string> } = {}): string {
+export function credentialsFile(opts: { scan?: boolean; scanUser?: string; groups?: Record<string, string>; emails?: Record<string, string> } = {}): string {
   const g = (u: string, d: string) => opts.groups?.[u] ?? d;
+  /** The optional sixth field: the user's e-mail addresses for Cloudflare Access. */
+  const e = (u: string) => (opts.emails?.[u] ? ` ${opts.emails[u]}` : "");
   const lines = [
-    `alice ${T.alice} alpha ${g("alice", "agents")} ${sha256hex(BEARERS.alice)}`,
-    `bob ${T.bob} beta ${g("bob", "agents")} ${sha256hex(BEARERS.bob)}`,
-    `carol ${T.alice} beta ${g("carol", "agents")} ${sha256hex(BEARERS.carol)}`, // alice's token under another name: SilverBullet grants nothing on beta
+    `alice ${T.alice} alpha ${g("alice", "agents")} ${sha256hex(BEARERS.alice)}${e("alice")}`,
+    `bob ${T.bob} beta ${g("bob", "agents")} ${sha256hex(BEARERS.bob)}${e("bob")}`,
+    `carol ${T.alice} beta ${g("carol", "agents")} ${sha256hex(BEARERS.carol)}${e("carol")}`, // alice's token under another name: SilverBullet grants nothing on beta
   ];
-  if (opts.scan !== false) lines.push(`${opts.scanUser ?? "scan"} ${T.scan} - - -`);
+  if (opts.scan !== false) lines.push(`${opts.scanUser ?? "scan"} ${T.scan} - - -${e("scan")}`);
   return lines.join("\n") + "\n";
 }
 
@@ -134,9 +136,11 @@ export type McpClient = {
   close(): Promise<void>;
 };
 
-export async function connect(url: string, bearer: string): Promise<McpClient> {
+/** An MCP client that sends `bearer` in the Authorization header, or, given headers, exactly those. */
+export async function connect(url: string, bearer: string | Record<string, string>): Promise<McpClient> {
   const client = new Client({ name: "integration-test", version: "0" });
-  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${bearer}` } } });
+  const headers = typeof bearer === "string" ? { Authorization: `Bearer ${bearer}` } : bearer;
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers } });
   await client.connect(transport);
   return {
     async call(tool, args = {}) {

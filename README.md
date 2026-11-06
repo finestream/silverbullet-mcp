@@ -10,7 +10,7 @@ One MCP server for a whole SilverBullet instance that, beyond reading and writin
 2. reaches **every space** of the instance that the agent's user may access (SilverBullet ≥ 2.10 multi-space mode, spaces addressed as `/<space>`);
 3. returns a page **rendered**, as Markdown with `${…}` expressions, queries, templates and transclusions evaluated, and as a **screenshot** (PNG), next to the raw source;
 4. keeps the **revision-guarded `edit-note`** with `dryRun`, so that clients written for v1 keep working;
-5. runs behind a reverse proxy with **secrets from files**, and verifies **OAuth tokens** of an external identity provider beside static bearers;
+5. runs behind a reverse proxy with **secrets from files**, and verifies **OAuth tokens** of an external identity provider, or the assertions of **Cloudflare Access** in front of it, beside static bearers;
 6. **restricts each agent further than SilverBullet does**, by path, with a deny-by-default access list per user and group that never widens what SilverBullet grants and applies to every tool, listings and search included;
 7. **keeps code out of the pages agents write**, so that a page an agent wrote can be opened and rendered by any person without running anything but audited code;
 8. is **MIT**, with code taken only from MIT, Apache or BSD sources.
@@ -27,7 +27,7 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 
 ## Status
 
-**Core server and rendering, phases 1a and 1b.** The server in `src/` serves the ten tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, the refusal to serve, and the two render tools over SilverBullet's Runtime API. Phase 1c adds the deployment material: the client guide and the acceptance test below. Phase 2 adds OAuth: the server verifies access tokens of an external identity provider as a resource server ([docs/oauth.md](docs/oauth.md)); built and tested against a test issuer, not yet run against a real identity provider. The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
+**Core server and rendering, phases 1a and 1b.** The server in `src/` serves the ten tools below as the authenticated user, with the credentials file, the access list, the write filter, the scan with its report page, the refusal to serve, and the two render tools over SilverBullet's Runtime API. Phase 1c adds the deployment material: the client guide and the acceptance test below. Phase 2 adds OAuth: the server verifies access tokens of an external identity provider as a resource server ([docs/oauth.md](docs/oauth.md)); built and tested against a test issuer, not yet run against a real identity provider. Beside it, the server accepts requests that came through Cloudflare Access, by verifying the assertion Access adds ([docs/cloudflare-access.md](docs/cloudflare-access.md)); built and tested against a test team domain. The architecture and the security model are in `docs/`; the *release checks* in `test/` assert, per SilverBullet release, the behaviour the design relies on.
 
 ## What is here
 
@@ -35,10 +35,11 @@ The server ships strict: a deny-by-default access list, a write filter on every 
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | Architecture decision for v2, with the measurements of the Runtime API spike |
 | [`docs/oauth.md`](docs/oauth.md) | OAuth: what the server verifies, what the identity provider must do (with Keycloak), client registration, reachability, connecting a client |
+| [`docs/cloudflare-access.md`](docs/cloudflare-access.md) | Cloudflare Access in front of the server: what the server verifies, what the Access application must do, the route, connecting a client |
 | [`docs/security.md`](docs/security.md) | Security model: threat model, access list, write filter, allowlist, scan, index-time transform, defaults |
 | [`docs/space-guidelines.md`](docs/space-guidelines.md) | Conventions a space follows when this server guards it |
 | [`docs/facts/`](docs/facts) | Measured behaviour of SilverBullet 2.12.1 that the security model rests on |
-| [`src/`](src) | The server: `main.ts` (entry, `--scan`, `--hash`), `server.ts` (HTTP, auth), `tools.ts` (the tools), `filter/` (the write filter on the vendored parser, the allowlist), `access.ts`, `credentials.ts`, `scan.ts`, `render.ts` (the render path over the Runtime API), `edit.ts`; unit tests beside the code |
+| [`src/`](src) | The server: `main.ts` (entry, `--scan`, `--hash`), `server.ts` (HTTP, auth), `oauth.ts` and `cf-access.ts` (the two verifiers), `tools.ts` (the tools), `filter/` (the write filter on the vendored parser, the allowlist), `access.ts`, `credentials.ts`, `scan.ts`, `render.ts` (the render path over the Runtime API), `edit.ts`; unit tests beside the code |
 | [`config/`](config) | The shipped allowlist and examples of the credentials file, the access list and the allowed-files list |
 | [`test/`](test) | The release checks (a compose test instance, a bootstrap through the admin API, one check per assumption, a report per SilverBullet version) and, in `test/server/`, the server's integration tests against the same instance |
 | [`scripts/acceptance.ts`](scripts/acceptance.ts) | The acceptance test of a running server, from any machine that reaches it (*Acceptance test* below) |
@@ -90,6 +91,8 @@ claude mcp add --scope user --transport http notes https://mcp.example.org/mcp -
 
 In Claude on the web, desktop and mobile: *Settings → Connectors → Add custom connector*, with the server's URL. Which client ID to enter, which redirect URIs the identity provider must allow, and from where each client must reach the server are in [docs/oauth.md](docs/oauth.md), sections 3 to 5. Static bearers keep working beside it.
 
+**Through Cloudflare Access** (`MCP_CF_ACCESS_TEAM_DOMAIN` and `MCP_CF_ACCESS_AUD` set) a hosted client connects by the public URL and the user logs in at Access, which is then the only thing reachable from the internet; the user's line in the credentials file names the e-mail address Access signs in ([docs/cloudflare-access.md](docs/cloudflare-access.md)). The other ways in keep working beside it, by a route that does not pass Access.
+
 ## Acceptance test
 
 `scripts/acceptance.ts` checks a running server from any machine that reaches it, as one user, and prints `PASS` or `FAIL` per check: a wrong bearer is refused with 401 and `/healthz` answers; `list-spaces` shows the spaces with the effective rights; a denied page is absent from listings and search and refused on read by the access list; a page is read raw with its revision; `render-note` and `screenshot-note` are either evaluated (a PNG) or refused by the access list, as `MCP_EXPECT_RENDER` says; a write outside the user's area is refused by the access list; a page with a `space-lua` block inside it is refused by the write filter with rule and line; a stale `edit-note` is rejected and the current revision accepted; the report page shows *serving*, a scan and no findings. It writes one page under `MCP_WRITE_AREA` and deletes it again where the user may.
@@ -108,7 +111,7 @@ Three files and a few variables. The files are re-read when they change; a `SIGH
 
 | File | Variable | What |
 |---|---|---|
-| credentials (a secret) | `MCP_CREDENTIALS_FILE`, default `/run/secrets/credentials` | One line per SilverBullet user: API token, default space, groups, bearer hashes; the line of the technical user (`MCP_SCAN_USER`, default `scan`) ([example](config/credentials.example); [docs/security.md](docs/security.md), section 3) |
+| credentials (a secret) | `MCP_CREDENTIALS_FILE`, default `/run/secrets/credentials` | One line per SilverBullet user: API token, default space, groups, bearer hashes and, optionally, the e-mail addresses for Cloudflare Access; the line of the technical user (`MCP_SCAN_USER`, default `scan`) ([example](config/credentials.example); [docs/security.md](docs/security.md), section 3) |
 | access list | `MCP_ACCESS_LIST_FILE`, default `$MCP_CONFIG_DIR/access-list` | What each user or group may do per space and path ([example](config/access-list.example); [docs/security.md](docs/security.md), section 4) |
 | allowlist | `MCP_ALLOWLIST_FILE`, default `$MCP_CONFIG_DIR/allowlist` | The functions a page may call ([shipped default](config/allowlist); [docs/security.md](docs/security.md), section 6) |
 | allowed files | `MCP_ALLOWED_FILES_FILE`, default `$MCP_CONFIG_DIR/allowed-files`, optional | Non-page files the scan may ignore ([example](config/allowed-files.example); [docs/security.md](docs/security.md), section 7) |
@@ -131,6 +134,7 @@ Three files and a few variables. The files are re-read when they change; a `SIGH
 | `MCP_LOG_LEVEL` | `info` | `info` or `debug`; the log is JSON lines on stdout |
 | `MCP_OAUTH_ISSUER`, `MCP_OAUTH_RESOURCE` | none | Both set: the server verifies OAuth access tokens of that issuer for that resource URL, beside static bearers ([docs/oauth.md](docs/oauth.md)) |
 | `MCP_OAUTH_JWKS_URL`, `MCP_OAUTH_USER_CLAIM`, `MCP_OAUTH_SCOPES` | from the issuer; `preferred_username`; none | Where the issuer's keys are, which claim names the user, which scopes a token must carry |
+| `MCP_CF_ACCESS_TEAM_DOMAIN`, `MCP_CF_ACCESS_AUD` | none | Both set: a request that came through Cloudflare Access is authenticated by the assertion Access adds, verified against that team domain and that application's AUD tag ([docs/cloudflare-access.md](docs/cloudflare-access.md)) |
 
 A setting weaker than the shipped default is accepted and reported once ([docs/space-guidelines.md](docs/space-guidelines.md), *Defaults and overrides*).
 
@@ -148,7 +152,7 @@ A setting weaker than the shipped default is accepted and reported once ([docs/s
 
 ```sh
 npm run lint                                          # eslint and tsc
-npm run test:unit                                     # the edit engine, the write filter, the access list, the credentials file
+npm run test:unit                                     # the edit engine, the write filter, the access list, the credentials file, the verifiers
 docker compose -f test/compose.yaml up -d --wait      # SilverBullet on http://127.0.0.1:3300
 node test/bootstrap.ts                                # users, spaces, tokens, seed pages (idempotent)
 npm run test:integration                              # the server against that instance, rendering included

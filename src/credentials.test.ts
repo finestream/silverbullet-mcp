@@ -26,6 +26,7 @@ test("credentials: the file parses into users with groups, default space and bea
   assert.equal(scan.defaultSpace, null);
   assert.deepEqual(scan.groups, []);
   assert.deepEqual(scan.bearerHashes, []);
+  assert.deepEqual(alice.emails, [], "a line of five fields has no e-mail address");
 });
 
 test("credentials: a bearer is looked up by its hash; an unknown or empty bearer finds nobody", () => {
@@ -43,5 +44,29 @@ test("credentials: duplicates and malformed hashes are reported", () => {
   assert.match(problems[0], /appears twice/);
   assert.match(problems[1], /already used by "alice"/);
   assert.match(problems[2], /not a hex SHA-256/);
-  assert.match(problems[3], /5 fields/);
+  assert.match(problems[3], /5 or 6 fields/);
+});
+
+test("credentials: the optional sixth field holds the user's e-mail addresses; an address is looked up in any case", () => {
+  const { credentials, problems } = parseCredentials(`alice t a agents ${H_A1} Alice@Example.org,alice@other.example\nbob t b agents - -\ncarol t c - - carol@example.org # by Access only\nscan t - - -\n`);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(credentials.users.get("alice")!.emails, ["alice@example.org", "alice@other.example"]);
+  assert.deepEqual(credentials.users.get("bob")!.emails, []);
+  assert.equal(credentials.byEmail("alice@example.org")?.user, "alice");
+  assert.equal(credentials.byEmail("ALICE@OTHER.EXAMPLE")?.user, "alice");
+  assert.equal(credentials.byEmail("carol@example.org")?.user, "carol");
+  assert.equal(credentials.byEmail("bob@example.org"), null);
+  assert.equal(credentials.byEmail("alice"), null, "a user name is not an address");
+  assert.equal(credentials.byEmail("-"), null);
+  assert.equal(credentials.byEmail(""), null);
+  assert.equal(credentials.byBearer("alice-client-1")?.user, "alice", "bearers are unchanged beside it");
+});
+
+test("credentials: an address on two lines, a field that is no address and a seventh field are reported", () => {
+  const { credentials, problems } = parseCredentials("alice t a - - alice@example.org\nbob t b - - Alice@Example.org\ncarol t c - - carol\ndave t d - - dave@example.org extra\n");
+  assert.equal(problems.length, 3);
+  assert.match(problems[0], /line 2: e-mail address already used by "alice"/);
+  assert.match(problems[1], /line 3: "carol" is not an e-mail address/);
+  assert.match(problems[2], /line 4: .*got 7/);
+  assert.equal(credentials.byEmail("alice@example.org")?.user, "alice", "the first line keeps the address");
 });
