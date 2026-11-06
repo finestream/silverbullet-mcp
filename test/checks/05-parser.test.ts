@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { semver, version } from "../lib/env.ts";
 import { checkPage } from "../../src/filter/filter.ts";
-import { cases } from "../../src/filter/cases.ts";
+import { cases, matrixReader } from "../../src/filter/cases.ts";
 import { shippedAllowlist } from "../../src/filter/allowlist.ts";
 
 const VENDORED = ["lua.grammar", "parse-lua.js", "parse-lua.terms.js", "lua_comment.js"];
@@ -16,10 +16,10 @@ const UPSTREAM = "https://raw.githubusercontent.com/silverbulletmd/silverbullet"
 
 test("filter: the test matrix passes with the shipped allowlist", () => {
   const wrong = cases
-    .map((c) => ({ ...c, verdict: checkPage(c.page, shippedAllowlist()).ok ? "accept" : "reject" }))
+    .map((c) => ({ ...c, verdict: checkPage(c.page, shippedAllowlist(), matrixReader).ok ? "accept" : "reject" }))
     .filter((c) => c.verdict !== c.expect);
   assert.deepEqual(wrong.map((c) => `${c.id} ${c.name}: expected ${c.expect}, got ${c.verdict}`), []);
-  assert.equal(cases.length, 73);
+  assert.equal(cases.length, 100);
 });
 
 async function upstream(tag: string, path: string): Promise<string | null | undefined> {

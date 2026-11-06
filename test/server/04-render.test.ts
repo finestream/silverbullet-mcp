@@ -142,6 +142,79 @@ test("scan findings block rendering in that space only; read and write there sti
   assert.equal(lines[lines.length - 1].outcome, "refused:render-block");
 });
 
+test("transclusion: a page that transcludes what its writer may not read is refused at write time, in every form SilverBullet expands", async () => {
+  // The case found with the render tools: w and x under a path, no r on CONFIG, a page holding only a transclusion of CONFIG.
+  const name = track(unique("Projects/Leak"));
+  const refused = await alice.call("create-note", { space: "gamma", filename: name, content: "![[CONFIG]]\n" });
+  assert.equal(refused.isError, true, refused.text);
+  assert.match(refused.text, /^Refused by the write filter: the page would transclude what its reader may not read \(line 1, transclusion-denied: !\[\[CONFIG\]\]: user "alice" has no "r" on gamma\/CONFIG\)\. Nothing was written\./);
+  assert.equal((await sb.read(T.admin, "gamma", `${name}.md`)).status, 404, "nothing was written");
+  for (const form of ["![[CONFIG#Settings|the settings]]", "![[/CONFIG.md]]", "<!-- ![[CONFIG]] -->", "![config](/CONFIG)", "![[Library/Std/Config]]"]) {
+    const r = await alice.call("create-note", { space: "gamma", filename: name, content: `Intro\n\n${form}\n` });
+    assert.equal(r.isError, true, `${form}: ${r.text}`);
+    assert.match(r.text, /line 3, transclusion-denied: /, form);
+  }
+  // Code and a transclusion in one page: both are named.
+  const both = await alice.call("create-note", { space: "gamma", filename: name, content: '${space.readPage("CONFIG")}\n\n![[CONFIG]]\n' });
+  assert.match(both.text, /the page would hold code \(line 1, denied-name: space\.readPage\); and the page would transclude what its reader may not read \(line 3, transclusion-denied/);
+  // A readable target and an inert mention are accepted, and the render expands the transclusion.
+  const ok = await alice.call("create-note", { space: "gamma", filename: name, content: "![[Projects/One]]\n\nWrite `![[CONFIG]]` to transclude a page.\n" });
+  assert.equal(ok.isError, false, ok.text);
+  const rendered = await alice.call("render-note", { space: "gamma", filename: name });
+  assert.match(rendered.data!.content as string, /marker-gamma-one/);
+  assert.doesNotMatch(rendered.data!.content as string, /agentTest|tag\.define/, "nothing of CONFIG");
+  // edit-note filters the resulting page.
+  const edit = await alice.call("edit-note", { space: "gamma", filename: name, expectedRevision: ok.data!.revision, edits: [{ oldText: "![[Projects/One]]", newText: "![[CONFIG]]" }] });
+  assert.equal(edit.isError, true, edit.text);
+  assert.match(edit.text, /transclusion-denied: !\[\[CONFIG\]\]/);
+});
+
+test("transclusion: a target the writer may read and another user who may render the page may not is refused too", async () => {
+  // bob renders everywhere in gamma and may not read Private/; alice may.
+  const strict = await startServer({ accessList: RENDER_ACCESS + "bob gamma Private/ -\n" });
+  const alice2 = await connect(strict.url, BEARERS.alice);
+  const name = track(unique("Notes/Shared"));
+  try {
+    const r = await alice2.call("create-note", { space: "gamma", filename: name, content: "![[Private/Plan]]\n" });
+    assert.equal(r.isError, true, r.text);
+    assert.match(r.text, /transclusion-denied: !\[\[Private\/Plan\]\]: a user who may render this page \("x"\) has no "r" on gamma\/Private\/Plan/);
+    assert.doesNotMatch(r.text, /bob/, "the other user is not named to the writer");
+  } finally {
+    await alice2.close();
+    await strict.stop();
+  }
+});
+
+test("transclusion: the scan reports a page written by another route, naming who may render it; rendering is blocked in that space until it is gone", async () => {
+  const name = unique("Projects/Direct");
+  await sb.write(T.admin, "gamma", `${name}.md`, "Written in the editor.\n\n![[CONFIG]]\n");
+  try {
+    await server.rescan();
+    const report = (await sb.read(T.admin, "gamma", "MCP Server.md")).text;
+    const row = report.split("\n").find((l) => l.includes(name));
+    assert.ok(row, `a finding for ${name}:\n${report}`);
+    assert.match(row!, /\| 3 \| `transclusion-denied` \| `!\[\[CONFIG\]\]: alice may render this page \(x\) and may not read CONFIG` \|/);
+    const blocked = await alice.call("render-note", { space: "gamma", filename: "Rendered" });
+    assert.equal(blocked.isError, true);
+    assert.match(blocked.text, /^Rendering is blocked in space "gamma": the last scan found 1 transclusion\(s\) of a page that a user who may render there may not read\./);
+    const read = await alice.call("read-note", { space: "gamma", filename: name });
+    assert.equal(read.isError, false, "read still works");
+  } finally {
+    await sb.remove(T.admin, "gamma", `${name}.md`);
+    await server.rescan();
+  }
+  const again = await alice.call("render-note", { space: "gamma", filename: "Rendered" });
+  assert.equal(again.isError, false, again.text);
+});
+
+test("warning: x beside a denial in the same space is reported once at start and on the report page", async () => {
+  const lines = server.logs.filter((l) => l.includes("config.relaxed") && l.includes("rendering beside a denial"));
+  assert.ok(lines.some((l) => l.includes("in space gamma: alice (x on the rest of the space, Projects/; no r on CONFIG, SETTINGS, Library/)")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.includes("bob (x on the rest of the space; no r on CONFIG, SETTINGS, Library/)")), lines.join("\n"));
+  const report = (await sb.read(T.admin, "gamma", "MCP Server.md")).text;
+  assert.match(report, /## Settings weaker than the shipped defaults[\s\S]*rendering beside a denial in space gamma/);
+});
+
 test("write then render: the index wait makes a page written through the server visible to the next render; a delete too", async () => {
   const name = track(unique("Projects/Written"));
   const c = await alice.call("create-note", { space: "gamma", filename: name, content: "---\ntags: project\nstatus: active\n---\nWritten.\n\n* [ ] task-of-written-page\n" });

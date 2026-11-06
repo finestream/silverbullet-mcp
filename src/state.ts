@@ -3,6 +3,8 @@
 // statistics the report page shows. The refuse-to-serve and render-block
 // decisions (docs/security.md, sections 9 and 7) are read from here.
 
+import { TRANSCLUSION_RULE } from "./filter/filter.ts";
+
 export type Finding = { page: string; line: number; rule: string; detail: string };
 export type FileFinding = { file: string; contentType: string; size: number };
 
@@ -150,12 +152,15 @@ export class State {
   renderBlock(space: string): string | null {
     const s = this.spaces.get(space);
     if (!s) return null;
-    const n = s.findings.length;
-    const pages = new Set(s.findings.map((f) => f.page)).size;
+    const code = s.findings.filter((f) => f.rule !== TRANSCLUSION_RULE);
+    const transclusions = s.findings.length - code.length;
+    const n = code.length;
+    const pages = new Set(code.map((f) => f.page)).size;
     const m = s.files.length;
-    if (n === 0 && m === 0) return null;
+    if (n === 0 && m === 0 && transclusions === 0) return null;
     const parts: string[] = [];
     if (n > 0) parts.push(`${n} finding(s) on ${pages} page(s) with code outside CONFIG and Library/`);
+    if (transclusions > 0) parts.push(`${transclusions} transclusion(s) of a page that a user who may render there may not read`);
     if (m > 0) parts.push(`${m} file(s) that are not pages and are not on the allowed-files list`);
     return `Rendering is blocked in space "${space}": the last scan found ${parts.join(" and ")}. Operator: read the report page "${this.reportPage}" in that space, then fix or allow; agents may still read and write, and a cleaned page is accepted.`;
   }

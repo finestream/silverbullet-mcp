@@ -110,3 +110,44 @@ export function compileAccessList(entries: AccessEntry[]): AccessList {
 }
 
 export const rightsText = (rights: Rights) => (rights.size === 0 ? "-" : (["r", "w", "d", "x"] as const).filter((r) => rights.has(r)).join(""));
+
+/** A user as the access list sees it: the name and the groups of its credentials line. */
+export type Subject = { user: string; groups: readonly string[] };
+
+/**
+ * The users who may render `page` (`x`) and may not read `target` (`r`). A render runs with the
+ * user's SilverBullet rights, so a transclusion of `target` in `page` would show it to them
+ * (docs/security.md, sections 5 and 12).
+ */
+export function renderersWithoutRead(acl: AccessList, subjects: readonly Subject[], space: string, page: string, target: string): string[] {
+  return subjects
+    .filter((s) => acl.rights(s.user, s.groups, space, page).has("x") && !acl.rights(s.user, s.groups, space, target).has("r"))
+    .map((s) => s.user);
+}
+
+/** A name that lies under an entry's path and under no more specific one: the rights there are the entry's own reach. */
+const sampleOf = (entryPath: string) => (entryPath === "/" ? "\u0001" : entryPath.endsWith("/") ? `${entryPath}\u0001` : entryPath);
+const pathText = (entryPath: string) => (entryPath === "/" ? "the rest of the space" : entryPath);
+
+/**
+ * Per space, the users who have `x` on some path and no `r` on another (a `-`, or no entry at
+ * all): a render there can show them what the list keeps from `read-note`. One line per space,
+ * for the warnings of docs/security.md, section 11. `*` stands for every space not named.
+ */
+export function rendersWithDenials(acl: AccessList, subjects: readonly Subject[]): string[] {
+  const out: string[] = [];
+  const spaces = [...new Set(acl.entries.map((e) => e.space))].sort();
+  for (const space of spaces) {
+    const users: string[] = [];
+    for (const s of subjects) {
+      const paths = [...new Set(["/", ...acl.entriesFor(s.user, s.groups, space).map((e) => e.path)])];
+      const withX = paths.filter((p) => acl.rights(s.user, s.groups, space, sampleOf(p)).has("x"));
+      const withoutR = paths.filter((p) => !acl.rights(s.user, s.groups, space, sampleOf(p)).has("r"));
+      if (withX.length && withoutR.length) users.push(`${s.user} (x on ${withX.map(pathText).join(", ")}; no r on ${withoutR.map(pathText).join(", ")})`);
+    }
+    if (users.length) {
+      out.push(`rendering beside a denial in ${space === "*" ? "every space" : `space ${space}`}: ${users.join("; ")}. A render shows what SilverBullet lets the user see: a page with x can show a page without r, by a transclusion or a query`);
+    }
+  }
+  return out;
+}

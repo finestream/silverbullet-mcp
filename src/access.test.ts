@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compileAccessList, parseAccessList, rightsText } from "./access.ts";
+import { compileAccessList, parseAccessList, renderersWithoutRead, rendersWithDenials, rightsText } from "./access.ts";
 
 const LIST = `
 # user-or-group  space    path            rights
@@ -68,4 +68,32 @@ test("access: malformed lines are reported and skipped", () => {
   const { entries: e, problems: p } = parseAccessList("bot notes /\nbot notes / q\nbot notes / r\n");
   assert.equal(e.length, 1);
   assert.equal(p.length, 2);
+});
+
+const SUBJECTS = [
+  { user: "writer-bot", groups: ["agents"] },
+  { user: "reader", groups: ["agents"] },
+  { user: "guest", groups: ["readers"] },
+];
+
+test("access: who may render a page and may not read a target", () => {
+  const who = (page: string, target: string) => renderersWithoutRead(acl, SUBJECTS, "notes", page, target);
+  assert.deepEqual(who("Shared/Plan", "CONFIG"), ["writer-bot"]);
+  assert.deepEqual(who("Shared/Plan", "Library/Code"), ["writer-bot"]);
+  assert.deepEqual(who("Shared/Plan", "Notes/One"), []);
+  assert.deepEqual(who("Notes/One", "CONFIG"), [], "nobody has x there");
+});
+
+test("access: a user with x on one path and no r on another is reported per space; a list without x reports nothing", () => {
+  const lines = rendersWithDenials(acl, SUBJECTS);
+  assert.equal(lines.length, 1, lines.join("\n"));
+  assert.match(lines[0], /^rendering beside a denial in space notes: writer-bot \(x on Shared\/, Shared\/Bot\/; no r on CONFIG, SETTINGS, Library\/\)\. /);
+  const plain = compileAccessList(parseAccessList("@agents * / r\n@agents * CONFIG -\n").entries);
+  assert.deepEqual(rendersWithDenials(plain, SUBJECTS), []);
+  // deny by default: x on a folder and no entry for the rest of the space
+  const narrow = compileAccessList(parseAccessList("reader * Drafts/ rwx\n").entries);
+  assert.deepEqual(rendersWithDenials(narrow, SUBJECTS), ["rendering beside a denial in every space: reader (x on Drafts/; no r on the rest of the space). A render shows what SilverBullet lets the user see: a page with x can show a page without r, by a transclusion or a query"]);
+  // x everywhere and no denial: nothing to report
+  const open = compileAccessList(parseAccessList("reader * / rx\n").entries);
+  assert.deepEqual(rendersWithDenials(open, SUBJECTS), []);
 });

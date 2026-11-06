@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { loadConfig, validateFileTypes, WatchedFile, DEFAULT_FILE_TYPES, type Config } from "./config.ts";
 import { parseCredentials, sha256hex, type Credentials } from "./credentials.ts";
-import { compileAccessList, parseAccessList, type AccessList } from "./access.ts";
+import { compileAccessList, parseAccessList, rendersWithDenials, type AccessList, type Subject } from "./access.ts";
 import { compileAllowlist, parseAllowlist, validateAllowlist, SHIPPED_ALLOWLIST, type Allowlist } from "./filter/allowlist.ts";
 import { parseAllowedFiles, Scanner, type AllowedFile } from "./scan.ts";
 import { SilverBullet } from "./sb.ts";
@@ -46,7 +46,7 @@ export function buildApp(config: Config) {
     state.accessList = { ok: accessList.present && accessList.problems.length === 0, problems: accessList.problems };
     state.allowlist = { ok: allowlist.present && allowlist.problems.length === 0, problems: allowlist.problems };
     state.fileTypes = { ok: validateFileTypes(config.fileTypes).length === 0, problems: validateFileTypes(config.fileTypes) };
-    state.relaxed = relaxedSettings(config, allowlist.value, accessList.value);
+    state.relaxed = relaxedSettings(config, allowlist.value, accessList.value, subjectsOf(credentials.value));
     for (const f of files) if (f.problems.length) log.warn("config.problems", { file: f.path, problems: f.problems });
   };
   for (const f of files) f.load().onChange(() => {
@@ -64,6 +64,8 @@ export function buildApp(config: Config) {
     seedSpaces: () => [...new Set([...(credentials.value?.users.values() ?? [])].map((u) => u.defaultSpace).filter((s): s is string => !!s))],
     allowlist: () => (state.allowlist.ok ? allowlist.value : null),
     allowedFiles: () => allowedFiles.value ?? [],
+    accessList: () => (state.accessList.ok ? accessList.value : null),
+    subjects: () => subjectsOf(credentials.value),
   });
 
   const renderer = new Renderer({ sb, state, config, log });
@@ -71,8 +73,11 @@ export function buildApp(config: Config) {
   return { config, state, sb, credentials, accessList, allowlist, allowedFiles, scanner, renderer, refresh, files, version };
 }
 
+/** The users of the credentials file as the access list sees them. */
+const subjectsOf = (credentials: Credentials | null): Subject[] => [...(credentials?.users.values() ?? [])].map((u) => ({ user: u.user, groups: u.groups }));
+
 /** Settings weaker than the shipped defaults (docs/security.md, section 11), reported once. */
-function relaxedSettings(config: Config, allow: Allowlist | null, acl: AccessList | null): string[] {
+function relaxedSettings(config: Config, allow: Allowlist | null, acl: AccessList | null, subjects: readonly Subject[]): string[] {
   const out: string[] = [];
   if (allow) {
     const extra = allow.entries.filter((e) => !SHIPPED_ALLOWLIST.includes(e));
@@ -91,6 +96,7 @@ function relaxedSettings(config: Config, allow: Allowlist | null, acl: AccessLis
         if (e.rights.has("w") || e.rights.has("d")) out.push(`write access for ${e.subject} on ${e.path} (access list line ${e.line}): the write filter does not apply there`);
       }
     }
+    out.push(...rendersWithDenials(acl, subjects));
   }
   return out;
 }
@@ -111,7 +117,7 @@ async function serve(config: Config) {
   const server = createHttpServer({
     auth: oauth ? bearerOrOAuth(credentials, oauth, config.scanUser) : staticBearerAuth(credentials),
     oauth,
-    context: (user) => ({ user, sb: app.sb, acl: app.accessList.value!, allow: app.allowlist.value ?? compileAllowlist([]), config, state, log, renderer: app.renderer }),
+    context: (user) => ({ user, sb: app.sb, acl: app.accessList.value!, subjects: subjectsOf(app.credentials.value), allow: app.allowlist.value ?? compileAllowlist([]), config, state, log, renderer: app.renderer }),
     state,
     log,
     rateLimit: config.rateLimit,
