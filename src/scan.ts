@@ -4,9 +4,9 @@
 // CONFIG and Library/ hold code, which files are not pages; the report page
 // per space; the quarantine when the operator chose it.
 
-import { checkPage, isCodePlace, type Violation } from "./filter/filter.ts";
+import { checkPage, isCodePlace, type TransclusionCheck, type Violation } from "./filter/filter.ts";
 import { compileAllowlist, type Allowlist } from "./filter/allowlist.ts";
-import { pageNameOf, pathMatches } from "./access.ts";
+import { pageNameOf, pathMatches, renderersWithoutRead, type AccessList, type Subject } from "./access.ts";
 import { SbError, type SilverBullet, type SbFile } from "./sb.ts";
 import type { Config } from "./config.ts";
 import type { State, SpaceState, Finding, FileFinding } from "./state.ts";
@@ -72,6 +72,9 @@ export type ScanDeps = {
   seedSpaces: () => string[];
   allowlist: () => Allowlist | null;
   allowedFiles: () => AllowedFile[];
+  /** The access list and the users of the credentials file, for the transclusion rule; without them it is not checked. */
+  accessList?: () => AccessList | null;
+  subjects?: () => readonly Subject[];
 };
 
 export type ScanSummary = { spaces: string[]; findings: number; files: number; unguarded: string[]; missingTransform: string[]; ms: number };
@@ -185,12 +188,13 @@ export class Scanner {
       pagesChecked++;
       const read = await sb.read(token, space, f.name);
       const source = read.body.toString("utf8");
-      const verdict = checkPage(source, allow);
+      const transclusion = this.transclusionCheck(space, page);
+      const verdict = checkPage(source, allow, transclusion);
       if (verdict.ok) continue;
       if (config.scanMode === "quarantine") {
         const neutralised = quarantine(source, verdict.violations);
         // The neutralised page must pass the filter itself; otherwise it stays a finding.
-        if (checkPage(neutralised, allow).ok) {
+        if (checkPage(neutralised, allow, transclusion).ok) {
           try {
             await sb.write(token, space, f.name, neutralised, { ifMatch: read.etag ?? undefined });
             quarantined.push(page);
@@ -215,6 +219,23 @@ export class Scanner {
     s.findingsChangedSinceScan = false;
     void sb;
     await this.writeReport(space, token, s, files);
+  }
+
+  /**
+   * The scan has no writer to ask about: a transclusion is a finding when a user who may render
+   * the page (`x`) may not read its target (`r`), whoever wrote the page (docs/security.md, section 7).
+   */
+  private transclusionCheck(space: string, page: string): TransclusionCheck | undefined {
+    const acl = this.d.accessList?.();
+    const subjects = this.d.subjects?.() ?? [];
+    if (!acl) return undefined;
+    return {
+      page,
+      denied(target) {
+        const who = renderersWithoutRead(acl, subjects, space, page, target);
+        return who.length ? `${who.join(", ")} may render this page (x) and may not read ${target}` : null;
+      },
+    };
   }
 
   private async writeReport(space: string, token: string, s: SpaceState, files: SbFile[]) {
@@ -310,7 +331,7 @@ export function renderReport(space: string, s: SpaceState, state: State, config:
     lines.push("| Page | Line | Rule | Detail |", "|---|---|---|---|");
     for (const f of s.findings) lines.push(`| ${pageRef(f.page)} | ${f.line} | ${cell(f.rule)} | ${cell(f.detail)} |`);
   } else if (!state.allowlist.ok) lines.push("Pages were not checked: the allowlist is invalid, and the server refuses to serve.");
-  else lines.push("None: every page outside CONFIG and Library/ is data.");
+  else lines.push("None: every page outside CONFIG and Library/ is data, and none transcludes what a user who may render it may not read.");
   lines.push("");
   if (s.quarantined.length) {
     lines.push(`## Quarantined in this run (${s.quarantined.length})`, "");

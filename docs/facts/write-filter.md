@@ -39,7 +39,7 @@ The whole filter is 200 lines; the walk itself about 60. The spike's denied name
 
 ## 4. Test matrix
 
-The matrix of the spike, 41 cases, with two lists: *minimal* = `query`, `template.*` (the list the security model started with); *extended* = minimal + `index.*`, `string.*`, `views.*`. Bold = differs from the expectation. The server's filter runs a matrix of 74 cases with the shipped allowlist (`node --test src/filter/filter.test.ts`): these 41 and the cases for the rules added after the spike, references governed by the allowlist, named query rows, aggregates, the tag argument of `index.*`, baked sections, and the functions that evaluate their input ([security.md](../security.md), sections 5 and 6).
+The matrix of the spike, 41 cases, with two lists: *minimal* = `query`, `template.*` (the list the security model started with); *extended* = minimal + `index.*`, `string.*`, `views.*`. Bold = differs from the expectation. The server's filter runs a matrix of 100 cases with the shipped allowlist (`node --test src/filter/filter.test.ts`): these 41 and the cases for the rules added after the spike, references governed by the allowlist, named query rows, aggregates, the tag argument of `index.*`, baked sections, the functions that evaluate their input, and transclusions of what the reader may not read ([security.md](../security.md), sections 5 and 6).
 
 | id | case | expected | minimal | extended | reasons (extended list) |
 |---|---|---|---|---|---|
