@@ -95,7 +95,7 @@ The server's URL is the value of `MCP_OAUTH_RESOURCE`, entered exactly, path inc
 claude mcp add --scope user --transport http notes https://mcp.example.org/mcp --client-id <client id> --callback-port 8765
 ```
 
-Then `/mcp` in a session, choose the server and *Authenticate*: the browser opens the issuer's login. With a client registered by hand, `http://localhost:8765/callback` is the redirect URI to allow. Without `--client-id` the client registers itself, where the authorization server lets it.
+Then `/mcp` in a session, choose the server and *Authenticate*: the browser opens the issuer's login. With a client registered by hand, `http://localhost:8765/callback` and `http://127.0.0.1:8765/callback` are the redirect URIs to allow (section 3). Without `--client-id` the client registers itself, where the authorization server lets it.
 
 **Claude on the web, desktop and mobile**
 
