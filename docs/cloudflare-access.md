@@ -1,6 +1,6 @@
 # Cloudflare Access
 
-Status: **built and tested against a test team domain** (2026-11-06). The verifier reads a real team domain's keys; no request of a real Access application has reached the server yet. What rests on Cloudflare's documentation or on observation says so.
+Status: **built, tested against a test team domain, and reached once through a real Access application** (2026-11-06): a hosted MCP client logged in through Managed OAuth, and its requests, through a Cloudflare Tunnel, were accepted as the user whose address the assertion carried. What rests on Cloudflare's documentation or on observation says so.
 
 A third way in, beside static bearers and OAuth tokens ([oauth.md](oauth.md)), for a server that is published through [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/): Access logs the user in and lets a request through only then, and the server takes the user from the assertion Access adds to the request. With Access's [Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/), Access is also the OAuth authorization server a hosted MCP client needs, so the server's own identity provider does not have to be reachable from the internet.
 
@@ -60,7 +60,9 @@ From Cloudflare's [Application token](https://developers.cloudflare.com/cloudfla
 | `common_name` | absent | the service token's client ID |
 | `custom` | claims of the identity provider, if configured | absent |
 
-The server reads `email` and nothing else of the payload. **Not yet confirmed:** Cloudflare's Managed OAuth page says a request authorised with an OAuth token "looks the same as a browser-authenticated request" to the origin and lists no claims of its own for it; the first real request through an application shows them in the debug log.
+The server reads `email` and nothing else of the payload.
+
+**Observed for a Managed-OAuth request** (2026-11-06, a hosted MCP client logged in with a one-time PIN; names from the debug log, values not recorded): every claim of the user column, `email` included, plus three Cloudflare's page does not list: `oauth`, `policy_id` and `h_INTERNAL_DO_NOT_USE`. So an OAuth-authorised request does look like a browser-authenticated one to the origin, with a marker for the way it was authorised. The server ignores the three.
 
 ## 3. The route
 
@@ -82,4 +84,4 @@ A client on the operator's own network keeps the direct route, with an OAuth tok
 * `src/cf-access.test.ts`: the verifier alone, with a local key. Wrong audience, wrong issuer, expired, not yet valid, no expiry, another key, an unknown key, `alg: none`, an HMAC assertion keyed with the public key, another asymmetric algorithm; an assertion without an address; the configuration.
 * `src/credentials.test.ts`: the sixth field, the look-up by address, an address on two lines.
 * `test/server/06-cf-access.test.ts`: the server against the test instance and a test team domain, which is a local HTTP server that publishes keys at `/cdn-cgi/access/certs` and signs assertions. An assertion for A acts as A with A's access-list entries; every refusal with its logged reason and without a pointer to an authorization server; the assertion decides alone; static bearers and the OAuth challenge unchanged beside it; the header ignored without the settings; the team domain unreachable; a wrong configuration.
-* Not tested here: a real Access application, a real client's login through Managed OAuth, the tunnel. They need the deployment.
+* Not tested here, because they need an Access application and a tunnel: a real client's login through Managed OAuth and its requests through the tunnel. Done once by hand on 2026-11-06 against a test application, with the server on a workstation and fixture pages (the status line and the observed claims above).
