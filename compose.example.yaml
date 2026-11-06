@@ -19,6 +19,9 @@ services:
       # MCP_REPORT_PAGE: MCP Server
       # MCP_SCAN_USER: scan        # the technical user of the scan (docs/security.md, section 7)
       # MCP_RATE_LIMIT: "120"      # tool calls per user and minute
+      # OAuth beside the static bearers (docs/oauth.md): both, or neither
+      # MCP_OAUTH_ISSUER: https://login.example.org/realms/main
+      # MCP_OAUTH_RESOURCE: https://mcp.example.org/mcp   # the URL the clients enter, path included
     secrets:
       - credentials
     volumes:

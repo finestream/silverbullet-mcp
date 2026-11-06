@@ -12,7 +12,8 @@ import { parseAllowedFiles, Scanner, type AllowedFile } from "./scan.ts";
 import { SilverBullet } from "./sb.ts";
 import { State } from "./state.ts";
 import { log } from "./log.ts";
-import { createHttpServer, staticBearerAuth } from "./server.ts";
+import { bearerOrOAuth, createHttpServer, staticBearerAuth } from "./server.ts";
+import { OAuthVerifier } from "./oauth.ts";
 import { Renderer } from "./render.ts";
 
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
@@ -110,8 +111,12 @@ async function serve(config: Config) {
   // The start scan runs before the server listens, so that the state is known from the first request.
   await app.scanner.run().catch((e) => log.error("scan.failed", { error: (e as Error).message }));
 
+  const credentials = () => (state.credentials.ok ? app.credentials.value : null);
+  const oauth = config.oauth ? new OAuthVerifier(config.oauth) : null;
+  if (oauth) log.info("oauth", { issuer: oauth.config.issuer, resource: oauth.config.resource, userClaim: oauth.config.userClaim, scopes: oauth.config.scopes, metadata: oauth.metadataUrl() });
   const server = createHttpServer({
-    auth: staticBearerAuth(() => (state.credentials.ok ? app.credentials.value : null)),
+    auth: oauth ? bearerOrOAuth(credentials, oauth, config.scanUser) : staticBearerAuth(credentials),
+    oauth,
     context: (user) => ({ user, sb: app.sb, acl: app.accessList.value!, subjects: subjectsOf(app.credentials.value), allow: app.allowlist.value ?? compileAllowlist([]), config, state, log, renderer: app.renderer }),
     state,
     log,

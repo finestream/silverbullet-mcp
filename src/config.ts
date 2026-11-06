@@ -4,6 +4,7 @@
 // from a variable.
 
 import { readFileSync, statSync, watchFile, unwatchFile } from "node:fs";
+import { loadOAuthConfig, type OAuthConfig } from "./oauth.ts";
 
 export type ScanMode = "report" | "quarantine";
 
@@ -34,6 +35,8 @@ export type Config = {
   renderTimeout: number;
   /** Milliseconds a render waits for the runtime's index to hold a write made through the server, before the reboot fallback (docs/security.md, section 12). */
   indexWait: number;
+  /** The OAuth resource server settings (docs/oauth.md); null means static bearers only. */
+  oauth: OAuthConfig | null;
 };
 
 export const DEFAULT_FILE_TYPES = [".md"];
@@ -64,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     renderParallel: Number(env.MCP_RENDER_PARALLEL ?? 4),
     renderTimeout: parseDuration(env.MCP_RENDER_TIMEOUT ?? "90s"),
     indexWait: parseDuration(env.MCP_INDEX_WAIT ?? "5s"),
+    oauth: loadOAuthConfig(env),
   };
 }
 
