@@ -38,6 +38,7 @@ const REFUSED: Array<[string, string, RegExp]> = [
   ["an assignment in a where clause", '${query[[from p = index.tag "page" where (function() _G.x = 1 return true end)()]]}\n', /function-definition/],
   ["a call not on the allowlist", 'A\n\nB ${space.readPage("CONFIG")}\n', /line 3, denied-name: space.readPage/],
   ["a reference not on the allowlist", "${foo.bar}\n", /line 1, reference-not-allowed: foo.bar/],
+  ["a library's function, which the shipped allowlist does not hold", "${views.page(_CTX.currentPage.name)}\n", /line 1, call-not-allowed: views.page/],
   ["a dynamic call", '${_G["sp".."ace"].readPage("CONFIG")}\n', /dynamic-call/],
   ["a tag that is not a literal", "${query[[from index.tag(x) select name]]}\n", /tag-not-literal/],
   ["the space-lua tag", '${query[[from s = index.tag "space-lua" select s.ref]]}\n', /script-tag: index.tag "space-lua"/],
@@ -57,7 +58,7 @@ test("write filter: each rule refuses the write, naming the rule and the line; n
   }
 });
 
-test("write filter: a clean page with queries, templates and the DR footer is accepted", async () => {
+test("write filter: a clean page with queries, templates and a footer is accepted", async () => {
   const name = track(unique("Projects/Clean"));
   const content = [
     "---",
@@ -72,7 +73,7 @@ test("write filter: a clean page with queries, templates and the DR footer is ac
     "",
     "A `${space.readPage(\"CONFIG\")}` in a code span is text.",
     "",
-    "${views.page(_CTX.currentPage.name)}",
+    "${templates.pageItem(_CTX.currentPage)}",
     "",
   ].join("\n");
   const r = await alice.call("create-note", { filename: name, content });
