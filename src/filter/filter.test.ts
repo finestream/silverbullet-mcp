@@ -12,7 +12,7 @@ test("filter: every case of the matrix gets the verdict the security model asks 
     .filter((c) => c.verdict !== c.expect)
     .map((c) => `${c.id} ${c.name}: expected ${c.expect}, got ${c.verdict}`);
   assert.deepEqual(wrong, []);
-  assert.equal(cases.length, 73);
+  assert.equal(cases.length, 74);
 });
 
 test("filter: a violation names the rule, the line and the range of the directive", () => {
@@ -60,6 +60,16 @@ test("allowlist: the shipped file config/allowlist is the shipped list and is va
   const entries = parseAllowlist(readFileSync(new URL("../../config/allowlist", import.meta.url), "utf8"));
   assert.deepEqual(entries, [...SHIPPED_ALLOWLIST]);
   assert.deepEqual(validateAllowlist(entries), []);
+});
+
+test("allowlist: a library's function is not on the shipped list; the operator's entry admits it and nothing beside it", () => {
+  const page = "${mylib.views.page(_CTX.currentPage.name)}\n";
+  assert.deepEqual(checkPage(page, shippedAllowlist()).violations.map((x) => `${x.rule}: ${x.detail}`), ["call-not-allowed: mylib.views.page"]);
+  assert.ok(!SHIPPED_ALLOWLIST.some((e) => e.startsWith("views")), "no library name on the shipped list");
+  const allow = compileAllowlist([...SHIPPED_ALLOWLIST, "mylib.views.*"]);
+  assert.ok(checkPage(page, allow).ok);
+  assert.ok(!checkPage("${mylib.other()}\n", allow).ok);
+  assert.ok(!checkPage("${views.page(_CTX.currentPage.name)}\n", allow).ok);
 });
 
 test("allowlist: entries that name or cover a never-allowed name are invalid", () => {

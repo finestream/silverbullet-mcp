@@ -50,10 +50,13 @@ export const cases: Case[] = [
   { id: "P2", name: "bare reference", expect: "accept", page: "${templates.pageItem}\n" },
   { id: "P3", name: "query text outside a directive", expect: "accept", page: 'The query `query[[from index.tag "page"]]` and the text query[[from index.tag "page" where space.readPage(name)]] are plain text.\n' },
   { id: "P4", name: "unbalanced braces (plain text for SilverBullet)", expect: "accept", page: 'Cost: ${ not closed\n' },
-  { id: "P5", name: "DR footer views.page(_CTX...)", expect: "accept", page: "${views.page(_CTX.currentPage.name)}\n" },
+  { id: "P5", name: "page footer: a templates.* function on _CTX", expect: "accept", page: "${templates.pageItem(_CTX.currentPage)}\n" },
   { id: "P6", name: "query with string.* in where", expect: "accept", page: '${query[[from p = index.tag "page" where string.startsWith(p.name, "Agent/") select p.name]]}\n' },
   { id: "P7", name: "no directive at all, 'space' as a word", expect: "accept", page: "The space is the source of truth. config.set is documented on CONFIG.\n" },
   { id: "P8", name: "frontmatter with a dollar-brace in a string", expect: "accept", page: '---\ntitle: "costs ${5}"\n---\nText.\n' },
+
+  // A library's function is not shipped: the operator adds its entry after audit
+  { id: "L1", name: "page footer calling a library's function (views.page)", expect: "reject", page: "${views.page(_CTX.currentPage.name)}\n" },
 
   // Code spans and directives interleaved: both parsers follow CommonMark code-span rules,
   // so the directive that SilverBullet would run is the one the filter sees.
