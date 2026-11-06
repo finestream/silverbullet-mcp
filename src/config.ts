@@ -5,6 +5,7 @@
 
 import { readFileSync, statSync, watchFile, unwatchFile } from "node:fs";
 import { loadOAuthConfig, type OAuthConfig } from "./oauth.ts";
+import { loadCfAccessConfig, type CfAccessConfig } from "./cf-access.ts";
 
 export type ScanMode = "report" | "quarantine";
 
@@ -37,6 +38,8 @@ export type Config = {
   indexWait: number;
   /** The OAuth resource server settings (docs/oauth.md); null means static bearers only. */
   oauth: OAuthConfig | null;
+  /** Cloudflare Access in front of the server (docs/cloudflare-access.md); null means its assertions are not looked at. */
+  cfAccess: CfAccessConfig | null;
 };
 
 export const DEFAULT_FILE_TYPES = [".md"];
@@ -68,6 +71,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     renderTimeout: parseDuration(env.MCP_RENDER_TIMEOUT ?? "90s"),
     indexWait: parseDuration(env.MCP_INDEX_WAIT ?? "5s"),
     oauth: loadOAuthConfig(env),
+    cfAccess: loadCfAccessConfig(env),
   };
 }
 

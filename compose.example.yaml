@@ -22,6 +22,9 @@ services:
       # OAuth beside the static bearers (docs/oauth.md): both, or neither
       # MCP_OAUTH_ISSUER: https://login.example.org/realms/main
       # MCP_OAUTH_RESOURCE: https://mcp.example.org/mcp   # the URL the clients enter, path included
+      # Cloudflare Access in front of the server (docs/cloudflare-access.md): both, or neither
+      # MCP_CF_ACCESS_TEAM_DOMAIN: <team>.cloudflareaccess.com
+      # MCP_CF_ACCESS_AUD: <the application's AUD tag>
     secrets:
       - credentials
     volumes:

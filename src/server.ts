@@ -1,8 +1,9 @@
 // The HTTP side: `/healthz`, the Protected Resource Metadata when OAuth is
 // configured, and `/mcp` as stateless streamable HTTP. Each request is
 // authenticated by the bearer in the Authorization header, a static bearer or
-// an OAuth access token (docs/architecture.md, section 2), then served by its
-// own McpServer whose tools are bound to that user.
+// an OAuth access token, or by the assertion Cloudflare Access adds to a
+// request it let through (docs/architecture.md, section 2), then served by
+// its own McpServer whose tools are bound to that user.
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -12,9 +13,10 @@ import { Cache, registerTools, type Context } from "./tools.ts";
 import type { State } from "./state.ts";
 import type { Log } from "./log.ts";
 import type { OAuthVerifier, Rejected } from "./oauth.ts";
+import { ASSERTION_HEADER, type CfAccessVerifier } from "./cf-access.ts";
 
 /** The user behind a request, or why there is none. The reason is logged, never sent. */
-export type AuthResult = { user: Credential; via: "bearer" | "oauth" } | { user: null; reason: string; error?: Rejected["error"] };
+export type AuthResult = { user: Credential; via: "bearer" | "oauth" | "access" } | { user: null; reason: string; error?: Rejected["error"] };
 
 export type AuthModule = {
   authenticate(req: IncomingMessage): Promise<AuthResult>;
@@ -75,6 +77,37 @@ export function bearerOrOAuth(credentials: () => Credentials | null, oauth: OAut
   };
 }
 
+/** The assertion Cloudflare Access added to the request, or null. */
+const assertionOf = (req: IncomingMessage): string | null => {
+  const header = req.headers[ASSERTION_HEADER];
+  return (Array.isArray(header) ? header.join(",") : header)?.trim() || null;
+};
+
+/**
+ * Cloudflare Access in front of the server: a request that carries an assertion came through
+ * Access, and the assertion alone decides who it is. Its e-mail address selects the line of the
+ * credentials file that names it; never the scan's technical user. A bearer on such a request is
+ * not looked at, so a refused assertion is never rescued by another way in. A request without
+ * an assertion did not come through Access and is left to `otherwise`.
+ */
+export function accessOr(credentials: () => Credentials | null, access: CfAccessVerifier, scanUser: string, otherwise: AuthModule, log?: Log): AuthModule {
+  return {
+    async authenticate(req) {
+      const assertion = assertionOf(req);
+      if (!assertion) return otherwise.authenticate(req);
+      const known = credentials();
+      if (!known) return { user: null, reason: "no credentials file" };
+      const verified = await access.verify(assertion);
+      if (!verified.ok) return { user: null, reason: verified.reason, error: "invalid_token" };
+      const user = known.byEmail(verified.email);
+      if (!user || user.user === scanUser) return { user: null, reason: `Access assertion: no line of the credentials file has the e-mail address "${verified.email.slice(0, 80)}"`, error: "invalid_token" };
+      // The names only: what Access puts into an assertion is worth knowing, its values are not for the log.
+      log?.debug("auth.access", { user: user.user, claims: Object.keys(verified.claims).sort() });
+      return { user, via: "access" };
+    },
+  };
+}
+
 /** Tool calls per user and minute. */
 export class RateLimiter {
   private readonly hits = new Map<string, number[]>();
@@ -101,6 +134,8 @@ export type HttpDeps = {
   auth: AuthModule;
   /** The OAuth resource server, when configured: its metadata is served and its challenge sent. */
   oauth?: OAuthVerifier | null;
+  /** Whether Cloudflare Access is configured: a request with an assertion is then never pointed at the OAuth issuer. */
+  cfAccess?: boolean;
   context: (user: Credential) => Omit<Context, "user" | "cache">;
   state: State;
   log: Log;
@@ -134,7 +169,9 @@ export function createHttpServer(deps: HttpDeps): Server {
       const ok = configured.ok && deps.state.globalRefusal() === null;
       return json(res, ok ? 200 : 503, { ok, version: deps.version, scanning: deps.state.scanning });
     }
-    if (deps.oauth && deps.oauth.metadataPaths().includes(url.pathname)) {
+    // What came through Cloudflare Access was logged in by Access: the OAuth issuer is not its authorization server.
+    const throughAccess = deps.cfAccess === true && assertionOf(req) !== null;
+    if (deps.oauth && !throughAccess && deps.oauth.metadataPaths().includes(url.pathname)) {
       // Public by design (RFC 9728): it says where to get a token, nothing about users or spaces.
       if (req.method !== "GET" && req.method !== "HEAD") {
         res.setHeader("Allow", "GET, HEAD");
@@ -156,6 +193,10 @@ export function createHttpServer(deps: HttpDeps): Server {
       deps.log.info("auth.refused", { ip, reason: auth.reason });
       // Guessing bearers: a few refusals per minute and address, then 429.
       if (!refused.allow(ip)) return rpcError(res, 429, -32002, "Too many refused requests from this address.", { "Retry-After": "60" });
+      if (throughAccess) {
+        // No `resource_metadata`: Access, not this server, says where a client of that route logs in.
+        return rpcError(res, 401, -32001, "Unauthorized: the Cloudflare Access assertion of this request selects no user of this server.", { "WWW-Authenticate": 'Bearer realm="silverbullet-mcp", error="invalid_token"' });
+      }
       if (auth.error === "insufficient_scope") {
         return rpcError(res, 403, -32001, "Forbidden: the access token lacks a required scope.", { "WWW-Authenticate": deps.oauth!.challenge(auth.error) });
       }
